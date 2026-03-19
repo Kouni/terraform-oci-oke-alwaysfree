@@ -1,0 +1,61 @@
+# ─── Terraform Core ──────────────────────────────────────────────────────────
+# Local .terraform directories (recursive for nested modules)
+**/.terraform/*
+
+# Terraform state
+*.tfstate
+*.tfstate.*
+
+# Terraform plan files
+*.tfplan
+*.tfplan.json
+
+# Lock info (transient file created during apply)
+.terraform.tfstate.lock.info
+
+# Crash logs
+crash.log
+crash.*.log
+
+# ─── Sensitive Data ──────────────────────────────────────────────────────────
+# Variable files (may contain secrets)
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+# Private keys
+*.pem
+*.key
+
+# Environment files
+.env
+.env.*
+
+# ─── Override Files ──────────────────────────────────────────────────────────
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ─── CLI Configuration ──────────────────────────────────────────────────────
+.terraformrc
+terraform.rc
+
+# ─── Terragrunt ──────────────────────────────────────────────────────────────
+**/.terragrunt-cache/
+
+# ─── AI / Copilot Prompt Files ───────────────────────────────────────────────
+CLAUDE.md
+.claude/
+.github/copilot-instructions.md
+
+# ─── IDE ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
