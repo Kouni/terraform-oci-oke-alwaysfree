@@ -69,3 +69,9 @@ variable "freeform_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "always_free_validation_id" {
+  description = "ID of the Always Free validation resource. Ensures cluster creation waits for validation without blocking data sources."
+  type        = string
+  default     = null
+}
