@@ -41,6 +41,12 @@ locals {
 # OKE Cluster (Basic - Always Free)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Gate: cluster creation waits for Always Free limit validation,
+# but data sources above can start immediately in parallel.
+resource "terraform_data" "always_free_gate" {
+  input = var.always_free_validation_id
+}
+
 resource "terraform_data" "image_validation" {
   lifecycle {
     precondition {
@@ -73,6 +79,8 @@ resource "oci_containerengine_cluster" "this" {
   }
 
   freeform_tags = var.freeform_tags
+
+  depends_on = [terraform_data.always_free_gate]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -49,21 +49,20 @@ module "network" {
 module "oke" {
   source = "./modules/oke"
 
-  compartment_ocid        = var.compartment_ocid
-  cluster_name            = var.cluster_name
-  kubernetes_version      = var.kubernetes_version
-  vcn_id                  = module.network.vcn_id
-  api_endpoint_subnet_id  = module.network.api_endpoint_subnet_id
-  worker_subnet_id        = module.network.worker_subnet_id
-  lb_subnet_id            = module.network.lb_subnet_id
-  node_count              = var.node_count
-  node_ocpus              = var.node_ocpus
-  node_memory_in_gbs      = var.node_memory_in_gbs
-  boot_volume_size_in_gbs = var.boot_volume_size_in_gbs
-  ssh_public_key          = var.ssh_public_key
-  freeform_tags           = var.freeform_tags
-
-  depends_on = [terraform_data.always_free_validation]
+  compartment_ocid          = var.compartment_ocid
+  cluster_name              = var.cluster_name
+  kubernetes_version        = var.kubernetes_version
+  vcn_id                    = module.network.vcn_id
+  api_endpoint_subnet_id    = module.network.api_endpoint_subnet_id
+  worker_subnet_id          = module.network.worker_subnet_id
+  lb_subnet_id              = module.network.lb_subnet_id
+  node_count                = var.node_count
+  node_ocpus                = var.node_ocpus
+  node_memory_in_gbs        = var.node_memory_in_gbs
+  boot_volume_size_in_gbs   = var.boot_volume_size_in_gbs
+  ssh_public_key            = var.ssh_public_key
+  freeform_tags             = var.freeform_tags
+  always_free_validation_id = terraform_data.always_free_validation.id
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
