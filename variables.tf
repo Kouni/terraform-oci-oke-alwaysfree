@@ -182,7 +182,7 @@ variable "freeform_tags" {
 # n8n (workflow automation with Cloudflare Zero Trust Tunnel)
 
 variable "enable_n8n" {
-  description = "Deploy n8n workflow automation with Cloudflare Zero Trust Tunnel for secure access. Requires enable_nfs_storage = true"
+  description = "Deploy n8n workflow automation. Requires enable_nfs_storage = true and enable_cloudflare_tunnel = true"
   type        = bool
   default     = false
 }
@@ -215,4 +215,18 @@ variable "n8n_chart_version" {
   description = "n8n Helm chart version. If null, uses the latest available version"
   type        = string
   default     = null
+}
+
+# ──────────────── Cloudflare Tunnel ────────────────
+
+variable "enable_cloudflare_tunnel" {
+  description = "Deploy a shared Cloudflare Zero Trust Tunnel. Routes are configured in Cloudflare Dashboard"
+  type        = bool
+  default     = false
+}
+
+variable "cloudflare_tunnel_namespace" {
+  description = "Kubernetes namespace for the shared Cloudflare Tunnel"
+  type        = string
+  default     = "tunnel"
 }
