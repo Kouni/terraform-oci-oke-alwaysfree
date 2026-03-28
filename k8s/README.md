@@ -25,6 +25,7 @@
 - [部署後建議操作](#部署後建議操作)
 - [重要注意事項](#重要注意事項)
 - [疑難排解](#疑難排解)
+- [備份與還原](#備份與還原)
 - [解除安裝 / 清理](#解除安裝--清理)
 
 ---
@@ -588,6 +589,57 @@ enable_n8n         = true
 
 ---
 
+<!-- ──────────────── 備份與還原 ──────────────── -->
+
+## 備份與還原
+
+### 備份
+
+專案根目錄提供 `backup-n8n.sh` 腳本，一鍵備份所有 n8n 關鍵資料：
+
+```bash
+./backup-n8n.sh
+```
+
+備份內容：
+
+| 檔案 | 說明 |
+|------|------|
+| `database.sqlite` | n8n 完整資料（workflows、credentials、執行記錄、使用者帳號） |
+| `n8n-secrets.yaml` | K8s Secret YAML（N8N_ENCRYPTION_KEY 等） |
+| `cloudflare-tunnel.yaml` | Cloudflare Tunnel token YAML |
+| `plaintext-keys.txt` | 明文金鑰（方便存入密碼管理器） |
+| `helm-values.yaml` | n8n Helm release 設定值 |
+
+備份存放於 `backups/YYYYMMDDHHMM/`，最多保留 **7 份**，超過自動輪替刪除最舊的。
+
+> ⚠️ `backups/` 已被 `.gitignore` 排除，不會進入版控。
+
+### 還原
+
+如果需要還原 n8n 資料：
+
+```bash
+# 1. 還原 K8s Secrets
+kubectl apply -f backups/<YYYYMMDDHHMM>/n8n-secrets.yaml
+kubectl apply -f backups/<YYYYMMDDHHMM>/cloudflare-tunnel.yaml
+
+# 2. 還原 SQLite 資料庫
+N8N_POD=$(kubectl get pod -n n8n -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].metadata.name}')
+kubectl cp backups/<YYYYMMDDHHMM>/database.sqlite n8n/${N8N_POD}:/home/node/.n8n/database.sqlite
+
+# 3. 重啟 n8n 讓它讀取還原的資料庫
+kubectl rollout restart deployment/n8n-main -n n8n
+```
+
+### 重要備份事項
+
+- **`N8N_ENCRYPTION_KEY` 是最關鍵的備份項目**：遺失後所有已儲存的第三方憑證將無法解密
+- 建議首次部署後立即執行 `./backup-n8n.sh`，並將 `plaintext-keys.txt` 中的金鑰存入密碼管理器
+- 備份前腳本會自動執行 `PRAGMA wal_checkpoint(TRUNCATE)` 確保 SQLite 資料一致性
+
+---
+
 <!-- ──────────────── 解除安裝 / 清理 ──────────────── -->
 
 ## 解除安裝 / 清理
@@ -643,6 +695,9 @@ k8s/
 ├── namespace.yaml                  ← n8n namespace（無需修改）
 ├── n8n-secrets.yaml                ← n8n 核心設定 Secret（需手動編輯）
 └── cloudflare-tunnel-secret.yaml   ← Cloudflare Tunnel Token Secret（需手動編輯）
+
+backup-n8n.sh                       ← 備份腳本（專案根目錄）
+backups/                            ← 備份輸出目錄（gitignored）
 
 # Terraform 管理的資源（不需手動建立）：
 # main.tf → helm_release.n8n[0]                       Helm: n8n 官方 chart
