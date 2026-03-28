@@ -8,10 +8,12 @@
 set -euo pipefail
 
 NAMESPACE="${1:-n8n}"
+MAX_BACKUPS=7
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="${SCRIPT_DIR}/backups"
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP_SUBDIR="${BACKUP_DIR}/${TIMESTAMP}"
+DATE_DIR="$(date +%Y%m%d)"
+TIMESTAMP="$(date +%H%M%S)"
+BACKUP_SUBDIR="${BACKUP_DIR}/${DATE_DIR}/${TIMESTAMP}"
 
 # ──────────────── Preflight checks ────────────────
 command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
@@ -36,7 +38,7 @@ done
 echo "🔑 Extracting plaintext keys..."
 KEYS_FILE="${BACKUP_SUBDIR}/plaintext-keys.txt"
 cat > "${KEYS_FILE}" <<EOF
-# n8n Secrets Backup — ${TIMESTAMP}
+# n8n Secrets Backup — ${DATE_DIR}/${TIMESTAMP}
 # ⚠️  此檔案包含機敏資料，請存入密碼管理器後刪除
 
 EOF
@@ -64,6 +66,17 @@ if command -v helm >/dev/null 2>&1; then
     echo "   ✅ helm-values.yaml" || echo "   ⚠️  n8n helm release not found"
 else
   echo "   ⚠️  helm not found, skipping"
+fi
+
+# ──────────────── Rotation (keep latest MAX_BACKUPS) ────────────────
+BACKUP_COUNT=$(find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | wc -l | tr -d ' ')
+if [ "${BACKUP_COUNT}" -gt "${MAX_BACKUPS}" ]; then
+  REMOVE_COUNT=$((BACKUP_COUNT - MAX_BACKUPS))
+  echo "🗑️  Rotating old backups (keeping latest ${MAX_BACKUPS})..."
+  find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | head -n "${REMOVE_COUNT}" | while read -r old_dir; do
+    echo "   🗑️  Removing ${old_dir}"
+    rm -rf "${old_dir}"
+  done
 fi
 
 # ──────────────── Summary ────────────────
