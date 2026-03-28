@@ -37,13 +37,10 @@ output "n8n_setup_instructions" {
   description = "Instructions to create required K8s secrets before enabling n8n"
   value       = <<-EOT
     # Prerequisites — run BEFORE terraform apply with enable_n8n = true:
-    kubectl create namespace ${var.n8n_namespace}
-    kubectl create secret generic ${var.n8n_secret_name} --namespace ${var.n8n_namespace} \
-      --from-literal=N8N_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-      --from-literal=N8N_HOST="n8n.your-domain.com" \
-      --from-literal=N8N_PORT="5678" \
-      --from-literal=N8N_PROTOCOL="http"
-    kubectl create secret generic ${var.cloudflared_secret_name} --namespace ${var.n8n_namespace} \
-      --from-literal=TUNNEL_TOKEN="<your-cloudflare-tunnel-token>"
+    # 1. Edit k8s/n8n-secrets.yaml and k8s/cloudflare-tunnel-secret.yaml with your values
+    # 2. Apply manifests:
+    kubectl apply -f k8s/namespace.yaml
+    kubectl apply -f k8s/n8n-secrets.yaml
+    kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
   EOT
 }

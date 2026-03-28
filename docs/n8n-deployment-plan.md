@@ -370,24 +370,19 @@ resource "kubernetes_deployment_v1" "cloudflared" {
 ### Step 2: 建立 Kubernetes Secrets
 
 ```bash
-# 建立 namespace（Terraform 也會建立，但 secret 需先存在）
-kubectl create namespace n8n
+# 1. 編輯 manifest 檔案，填入你的值：
+#    - k8s/n8n-secrets.yaml      → N8N_ENCRYPTION_KEY, N8N_HOST
+#    - k8s/cloudflare-tunnel-secret.yaml → TUNNEL_TOKEN
 
-# n8n 核心 Secret（包含 4 個必要 key）
-# ⚠️ 請將 n8n.your-domain.com 替換為你的 Cloudflare Public Hostname
-kubectl create secret generic n8n-secrets \
-  --namespace n8n \
-  --from-literal=N8N_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-  --from-literal=N8N_HOST="n8n.your-domain.com" \
-  --from-literal=N8N_PORT="5678" \
-  --from-literal=N8N_PROTOCOL="http"
+# 生成 encryption key（複製輸出貼入 n8n-secrets.yaml）
+openssl rand -hex 32
 
-# Cloudflare Tunnel Secret
-kubectl create secret generic cloudflare-tunnel \
-  --namespace n8n \
-  --from-literal=TUNNEL_TOKEN="<your-cloudflare-tunnel-token>"
+# 2. Apply manifests
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/n8n-secrets.yaml
+kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
 
-# 驗證
+# 3. 驗證
 kubectl get secrets -n n8n
 ```
 
