@@ -178,3 +178,41 @@ variable "freeform_tags" {
     "alwaysfree" = "true"
   }
 }
+
+# n8n (workflow automation with Cloudflare Zero Trust Tunnel)
+
+variable "enable_n8n" {
+  description = "Deploy n8n workflow automation with Cloudflare Zero Trust Tunnel for secure access. Requires enable_nfs_storage = true"
+  type        = bool
+  default     = false
+}
+
+variable "n8n_namespace" {
+  description = "Kubernetes namespace for n8n and cloudflared deployments"
+  type        = string
+  default     = "n8n"
+}
+
+variable "n8n_pvc_size" {
+  description = "PVC size for n8n persistent data (SQLite DB, credentials, workflows). Allocated from NFS StorageClass"
+  type        = string
+  default     = "5Gi"
+}
+
+variable "n8n_secret_name" {
+  description = "Name of the pre-created K8s Secret containing N8N_ENCRYPTION_KEY, N8N_HOST, N8N_PORT, N8N_PROTOCOL"
+  type        = string
+  default     = "n8n-secrets"
+}
+
+variable "cloudflared_secret_name" {
+  description = "Name of the pre-created K8s Secret containing TUNNEL_TOKEN for Cloudflare Zero Trust Tunnel"
+  type        = string
+  default     = "cloudflare-tunnel"
+}
+
+variable "n8n_chart_version" {
+  description = "n8n Helm chart version. If null, uses the latest available version"
+  type        = string
+  default     = null
+}
