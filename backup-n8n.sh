@@ -11,9 +11,8 @@ NAMESPACE="${1:-n8n}"
 MAX_BACKUPS=7
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="${SCRIPT_DIR}/backups"
-DATE_DIR="$(date +%Y%m%d)"
-TIMESTAMP="$(date +%H%M%S)"
-BACKUP_SUBDIR="${BACKUP_DIR}/${DATE_DIR}/${TIMESTAMP}"
+TIMESTAMP="$(date +%Y%m%d%H%M)"
+BACKUP_SUBDIR="${BACKUP_DIR}/${TIMESTAMP}"
 
 # ──────────────── Preflight checks ────────────────
 command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
@@ -38,7 +37,7 @@ done
 echo "🔑 Extracting plaintext keys..."
 KEYS_FILE="${BACKUP_SUBDIR}/plaintext-keys.txt"
 cat > "${KEYS_FILE}" <<EOF
-# n8n Secrets Backup — ${DATE_DIR}/${TIMESTAMP}
+# n8n Secrets Backup — ${TIMESTAMP}
 # ⚠️  此檔案包含機敏資料，請存入密碼管理器後刪除
 
 EOF
