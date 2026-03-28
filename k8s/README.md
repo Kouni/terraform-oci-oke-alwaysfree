@@ -46,19 +46,19 @@ graph TB
     subgraph VCN["OCI Always Free VCN (10.0.0.0/16)"]
         subgraph OKE["OKE Cluster — BASIC_CLUSTER, Flannel CNI<br/>Worker: VM.Standard.A1.Flex (ARM64)"]
 
-            subgraph NS_TUNNEL["Namespace: tunnel"]
+            subgraph NS_TUNNEL["🔷 Namespace: tunnel"]
                 CFD["Deployment: cloudflared<br/><i>docker.io/cloudflare/cloudflared</i>"]
-                CF_SECRET[/"Secret: cloudflare-tunnel<br/>(TUNNEL_TOKEN)"/]
+                CF_SECRET[/"🔑 Secret: cloudflare-tunnel<br/>(TUNNEL_TOKEN)"/]
             end
 
-            subgraph NS_N8N["Namespace: n8n"]
+            subgraph NS_N8N["🟢 Namespace: n8n"]
                 SVC["Service: n8n-main<br/>ClusterIP :5678"]
                 N8N["Deployment: n8n-main<br/><i>(Helm: official n8n chart)</i><br/>n8nio/n8n — Standalone SQLite"]
-                N8N_SECRET[/"Secret: n8n-secrets<br/>N8N_ENCRYPTION_KEY<br/>N8N_HOST · PORT · PROTOCOL"/]
-                PVC[("PVC (nfs)<br/>ReadWriteOnce<br/>/home/node/.n8n")]
+                N8N_SECRET[/"🔑 Secret: n8n-secrets<br/>N8N_ENCRYPTION_KEY<br/>N8N_HOST · PORT · PROTOCOL"/]
+                PVC[("💾 PVC (nfs)<br/>ReadWriteOnce<br/>/home/node/.n8n")]
             end
 
-            subgraph NS_NFS["Namespace: nfs-storage"]
+            subgraph NS_NFS["🟣 Namespace: nfs-storage"]
                 NFS["nfs-server-provisioner<br/><i>OCI Block Volume</i><br/>(Always Free 200 GB shared)"]
             end
         end
@@ -72,22 +72,23 @@ graph TB
     N8N -->|mount| PVC
     PVC --> NFS
 
-    classDef tunnelNs fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px
-    classDef n8nNs fill:#d5e8d4,stroke:#82b366,stroke-width:2px
-    classDef nfsNs fill:#f5f0ff,stroke:#9673a6,stroke-width:1px
-    classDef secret fill:#fff2cc,stroke:#d6b656
-    classDef storage fill:#e1d5e7,stroke:#9673a6
-    classDef cf fill:#f48120,color:#fff,stroke:#f48120
-    classDef vcn fill:none,stroke:#312d2a,stroke-width:2px,stroke-dasharray:5 5
-    classDef oke fill:#f2f2f2,stroke:#999
+    classDef secret fill:#b8860b,color:#fff,stroke:#daa520,stroke-width:2px
+    classDef storage fill:#6a1b9a,color:#fff,stroke:#9c27b0,stroke-width:2px
+    classDef cf fill:#e65100,color:#fff,stroke:#ff6d00,stroke-width:2px
+    classDef deploy fill:#1a237e,color:#fff,stroke:#5c6bc0,stroke-width:1px
+    classDef svc fill:#004d40,color:#fff,stroke:#26a69a,stroke-width:1px
 
-    class NS_TUNNEL tunnelNs
-    class NS_N8N n8nNs
-    class NS_NFS nfsNs
     class CF_SECRET,N8N_SECRET secret
-    class PVC storage
+    class PVC,NFS storage
     class CF cf
-    class NFS storage
+    class CFD,N8N deploy
+    class SVC svc
+
+    style NS_TUNNEL fill:#1565c0,color:#fff,stroke:#42a5f5,stroke-width:2px
+    style NS_N8N fill:#2e7d32,color:#fff,stroke:#66bb6a,stroke-width:2px
+    style NS_NFS fill:#4a148c,color:#fff,stroke:#ab47bc,stroke-width:2px
+    style OKE fill:#37474f,color:#fff,stroke:#78909c,stroke-width:2px
+    style VCN fill:#263238,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5
 ```
 
 ### 流量路徑
