@@ -4,26 +4,42 @@ Terraform module to deploy an OKE (Oracle Kubernetes Engine) cluster using only 
 
 ## Architecture
 
-```
-Cloudflare Edge (Zero Trust Tunnel)
-   ▲ outbound connection from cloudflared pod
-   │
-┌──────────────────────────── VCN 10.0.0.0/16 ────────────────────────────┐
-│                                                                          │
-│  ┌─── Public Subnet (API) ──┐  ┌─── Public Subnet (LB) ──────────────┐ │
-│  │  10.0.0.0/28             │  │  10.0.2.0/24                        │ │
-│  │  OKE API Endpoint        │  │  Free Load Balancer (10 Mbps)       │ │
-│  └──────────────────────────┘  └─────────────────────────────────────┘ │
-│                                                                          │
-│  ┌─── Public Subnet (Workers) ──────────────────────────────────────┐   │
-│  │  10.0.1.0/24                                                      │   │
-│  │  VM.Standard.A1.Flex (4 OCPU, 24GB, ARM)                         │   │
-│  │  cloudflared pod → outbound to Cloudflare edge                   │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
-│  Internet Gateway ←→ Public subnets                                     │
-│  Service Gateway  ←→ OCI Services (image pull, OKE communication)       │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    CF["☁️ Cloudflare Edge<br/>(Zero Trust Tunnel)"]
+
+    subgraph VCN["🌐 VCN 10.0.0.0/16"]
+        subgraph SUB_API["Public Subnet — API (10.0.0.0/28)"]
+            API["OKE API Endpoint"]
+        end
+
+        subgraph SUB_LB["Public Subnet — LB (10.0.2.0/24)"]
+            LB["Free Load Balancer<br/>(10 Mbps)"]
+        end
+
+        subgraph SUB_WORKER["Public Subnet — Workers (10.0.1.0/24)"]
+            WORKER["VM.Standard.A1.Flex<br/>(4 OCPU, 24 GB, ARM64)"]
+            CFD["cloudflared pod<br/>→ outbound to Cloudflare"]
+        end
+
+        IGW["Internet Gateway ↔ Public Subnets"]
+        SGW["Service Gateway ↔ OCI Services<br/>(image pull, OKE communication)"]
+    end
+
+    CF -.->|"outbound<br/>connection"| CFD
+
+    classDef cf fill:#e65100,color:#fff,stroke:#ff6d00,stroke-width:2px
+    classDef node_box fill:#1a237e,color:#fff,stroke:#5c6bc0,stroke-width:1px
+    classDef gw fill:#37474f,color:#fff,stroke:#78909c,stroke-width:1px
+
+    class CF cf
+    class API,LB,WORKER,CFD node_box
+    class IGW,SGW gw
+
+    style VCN fill:#263238,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5
+    style SUB_API fill:#1565c0,color:#fff,stroke:#42a5f5,stroke-width:2px
+    style SUB_LB fill:#1565c0,color:#fff,stroke:#42a5f5,stroke-width:2px
+    style SUB_WORKER fill:#2e7d32,color:#fff,stroke:#66bb6a,stroke-width:2px
 ```
 
 ## What's Always Free
