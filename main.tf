@@ -269,7 +269,7 @@ resource "kubernetes_deployment_v1" "cloudflared" {
       spec {
         container {
           name  = "cloudflared"
-          image = "cloudflare/cloudflared:latest"
+          image = "docker.io/cloudflare/cloudflared:latest"
           args  = ["tunnel", "--no-autoupdate", "run"]
 
           env {
