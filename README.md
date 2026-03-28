@@ -114,23 +114,29 @@ kubectl get nodes
 | `kubeconfig_command` | OCI CLI command to generate kubeconfig |
 | `nfs_storage_class` | NFS StorageClass name (`"nfs"`) for dynamic PV provisioning (null if disabled) |
 | `budget_id` | The OCID of the budget (null if disabled) |
+| `n8n_namespace` | Kubernetes namespace where n8n is deployed (null if disabled) |
+| `n8n_setup_instructions` | Step-by-step instructions for n8n setup (null if disabled) |
 
 ## Cloudflare Zero Trust Tunnel Setup
 
-After the cluster is deployed, you can set up Cloudflare Tunnel for secure ingress:
+Cloudflare Tunnel is managed via Terraform as a shared service in the `tunnel` namespace.
+See [k8s/README.md](k8s/README.md) for the detailed deployment guide.
 
 ```bash
-# 1. Install cloudflared in the cluster
-kubectl create namespace cloudflare
-kubectl create secret generic cloudflare-tunnel-credentials \
-  --from-file=credentials.json=$HOME/.cloudflared/<TUNNEL_ID>.json \
-  -n cloudflare
+# Quick start:
+# 1. Create namespaces and secrets
+kubectl apply -f k8s/tunnel-namespace.yaml
+kubectl apply -f k8s/namespace.yaml
+# Edit k8s/cloudflare-tunnel-secret.yaml and k8s/n8n-secrets.yaml with real values, then:
+kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
+kubectl apply -f k8s/n8n-secrets.yaml
 
-# 2. Deploy cloudflared (create a Deployment manifest with your tunnel config)
-# cloudflared connects outbound to Cloudflare edge — no inbound ports needed
+# 2. Enable in terraform.tfvars
+#    enable_cloudflare_tunnel = true
+#    enable_n8n               = true
 
-# 3. Configure DNS in Cloudflare dashboard
-# Point your domain to the tunnel
+# 3. Deploy
+terraform apply
 ```
 
 This approach eliminates the need for inbound ports, providing security through Cloudflare's Zero Trust network.
