@@ -36,82 +36,58 @@
 
 ### 架構圖
 
-```
-                        ┌─────────┐
-                        │  User   │
-                        │ Browser │
-                        └────┬────┘
-                             │ HTTPS
-                             ▼
-                      ┌─────────────┐
-                      │  Cloudflare │
-                      │    Edge     │
-                      │ (Public     │
-                      │  Hostname)  │
-                      └──────┬──────┘
-                             │ Secure Tunnel (encrypted)
-╔════════════════════════════╪══════════════════════════════════════╗
-║  OCI Always Free VCN       │                                     ║
-║  ┌─────────────────────────┼───────────────────────────────────┐ ║
-║  │  OKE Cluster (BASIC_CLUSTER, Flannel CNI)                   │ ║
-║  │  Worker Node: VM.Standard.A1.Flex (ARM64)                   │ ║
-║  │                         │                                    │ ║
-║  │  ┌── Namespace: tunnel ──┼──────────────────────────────┐    │ ║
-║  │  │                       │                              │    │ ║
-║  │  │   ┌───────────────────▼──────────┐                   │    │ ║
-║  │  │   │  Deployment: cloudflared     │                   │    │ ║
-║  │  │   │  ┌─────────────────────────┐ │                   │    │ ║
-║  │  │   │  │ cloudflare/cloudflared  │ │                   │    │ ║
-║  │  │   │  │ :latest                 │ │                   │    │ ║
-║  │  │   │  │                         │ │                   │    │ ║
-║  │  │   │  │ TUNNEL_TOKEN ◄── Secret │ │                   │    │ ║
-║  │  │   │  │   (cloudflare-tunnel)   │ │                   │    │ ║
-║  │  │   │  └───────────┬─────────────┘ │                   │    │ ║
-║  │  │   └──────────────┼───────────────┘                   │    │ ║
-║  │  └──────────────────┼───────────────────────────────┘    │ ║
-║  │                     │                                    │ ║
-║  │                     │ http://n8n-main.n8n.svc.cluster.local:5678
-║  │                     │ (cross-namespace DNS)              │ ║
-║  │                     ▼                                    │ ║
-║  │  ┌─── Namespace: n8n ──────────────────────────────┐    │ ║
-║  │  │                                                  │    │ ║
-║  │  │   ┌──────────────────────────────┐               │    │ ║
-║  │  │   │  Service: n8n-main           │               │    │ ║
-║  │  │   │  type: ClusterIP :5678       │               │    │ ║
-║  │  │   └──────────────┬───────────────┘               │    │ ║
-║  │  │                  │                                │    │ ║
-║  │  │   ┌──────────────▼───────────────┐               │    │ ║
-║  │  │   │  Deployment: n8n-main        │               │    │ ║
-║  │  │   │  (Helm: official n8n chart)  │               │    │ ║
-║  │  │   │  ┌─────────────────────────┐ │               │    │ ║
-║  │  │   │  │ n8nio/n8n:latest        │ │               │    │ ║
-║  │  │   │  │ Standalone mode (SQLite)│ │               │    │ ║
-║  │  │   │  │                         │ │               │    │ ║
-║  │  │   │  │ Secrets ◄── Secret      │ │               │    │ ║
-║  │  │   │  │   (n8n-secrets)         │ │               │    │ ║
-║  │  │   │  │   • N8N_ENCRYPTION_KEY  │ │               │    │ ║
-║  │  │   │  │   • N8N_HOST            │ │               │    │ ║
-║  │  │   │  │   • N8N_PORT            │ │               │    │ ║
-║  │  │   │  │   • N8N_PROTOCOL        │ │               │    │ ║
-║  │  │   │  └───────────┬─────────────┘ │               │    │ ║
-║  │  │   └──────────────┼───────────────┘               │    │ ║
-║  │  │                  │ mount: /home/node/.n8n        │    │ ║
-║  │  │                  ▼                                │    │ ║
-║  │  │   ┌──────────────────────────────┐               │    │ ║
-║  │  │   │  PVC (StorageClass: nfs)     │               │    │ ║
-║  │  │   │  AccessMode: ReadWriteOnce   │               │    │ ║
-║  │  │   └──────────────┬───────────────┘               │    │ ║
-║  │  │                  │                                │    │ ║
-║  │  └──────────────────┼───────────────────────────────┘    │ ║
-║  │                     ▼                                    │ ║
-║  │   ┌──────────────────────────────────────┐               │ ║
-║  │   │  nfs-server-provisioner              │               │ ║
-║  │   │  (Namespace: nfs-storage)            │               │ ║
-║  │   │  Backed by OCI Block Volume          │               │ ║
-║  │   │  (Always Free 200 GB quota 共用)     │               │ ║
-║  │   └──────────────────────────────────────┘               │ ║
-║  └──────────────────────────────────────────────────────────┘ ║
-╚══════════════════════════════════════════════════════════════════╝
+```mermaid
+graph TB
+    User["🌐 User Browser"]
+    CF["☁️ Cloudflare Edge<br/>(Zero Trust + Access)"]
+
+    User -->|HTTPS| CF
+
+    subgraph VCN["OCI Always Free VCN (10.0.0.0/16)"]
+        subgraph OKE["OKE Cluster — BASIC_CLUSTER, Flannel CNI<br/>Worker: VM.Standard.A1.Flex (ARM64)"]
+
+            subgraph NS_TUNNEL["Namespace: tunnel"]
+                CFD["Deployment: cloudflared<br/><i>docker.io/cloudflare/cloudflared</i>"]
+                CF_SECRET[/"Secret: cloudflare-tunnel<br/>(TUNNEL_TOKEN)"/]
+            end
+
+            subgraph NS_N8N["Namespace: n8n"]
+                SVC["Service: n8n-main<br/>ClusterIP :5678"]
+                N8N["Deployment: n8n-main<br/><i>(Helm: official n8n chart)</i><br/>n8nio/n8n — Standalone SQLite"]
+                N8N_SECRET[/"Secret: n8n-secrets<br/>N8N_ENCRYPTION_KEY<br/>N8N_HOST · PORT · PROTOCOL"/]
+                PVC[("PVC (nfs)<br/>ReadWriteOnce<br/>/home/node/.n8n")]
+            end
+
+            subgraph NS_NFS["Namespace: nfs-storage"]
+                NFS["nfs-server-provisioner<br/><i>OCI Block Volume</i><br/>(Always Free 200 GB shared)"]
+            end
+        end
+    end
+
+    CF -.->|"Secure Tunnel<br/>(outbound only)"| CFD
+    CF_SECRET -.-> CFD
+    CFD -->|"http://n8n-main.n8n.svc<br/>.cluster.local:5678<br/>(cross-namespace)"| SVC
+    SVC --> N8N
+    N8N_SECRET -.-> N8N
+    N8N -->|mount| PVC
+    PVC --> NFS
+
+    classDef tunnelNs fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px
+    classDef n8nNs fill:#d5e8d4,stroke:#82b366,stroke-width:2px
+    classDef nfsNs fill:#f5f0ff,stroke:#9673a6,stroke-width:1px
+    classDef secret fill:#fff2cc,stroke:#d6b656
+    classDef storage fill:#e1d5e7,stroke:#9673a6
+    classDef cf fill:#f48120,color:#fff,stroke:#f48120
+    classDef vcn fill:none,stroke:#312d2a,stroke-width:2px,stroke-dasharray:5 5
+    classDef oke fill:#f2f2f2,stroke:#999
+
+    class NS_TUNNEL tunnelNs
+    class NS_N8N n8nNs
+    class NS_NFS nfsNs
+    class CF_SECRET,N8N_SECRET secret
+    class PVC storage
+    class CF cf
+    class NFS storage
 ```
 
 ### 流量路徑
