@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# n8n K8s Secrets Backup Script
+# n8n Backup Script
 #
-# 備份 n8n namespace 中的關鍵 Kubernetes Secrets 到本地 backups/ 目錄。
+# 備份 n8n 的 K8s Secrets、SQLite 資料庫、Helm values 到本地 backups/ 目錄。
 # 備份檔案包含真實機敏資料，請妥善保管。
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -56,6 +56,21 @@ if kubectl get secret cloudflare-tunnel -n "${NAMESPACE}" >/dev/null 2>&1; then
   val=$(kubectl get secret cloudflare-tunnel -n "${NAMESPACE}" -o jsonpath='{.data.TUNNEL_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || echo "<not found>")
   echo "TUNNEL_TOKEN=${val}" >> "${KEYS_FILE}"
   echo "" >> "${KEYS_FILE}"
+fi
+
+# ──────────────── Backup n8n SQLite database ────────────────
+echo "💾 Backing up n8n SQLite database..."
+N8N_POD=$(kubectl get pod -n "${NAMESPACE}" -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ -n "${N8N_POD}" ]; then
+  # Trigger SQLite checkpoint to flush WAL to main database
+  kubectl exec -n "${NAMESPACE}" "${N8N_POD}" -- \
+    sqlite3 /home/node/.n8n/database.sqlite "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+  kubectl cp "${NAMESPACE}/${N8N_POD}:/home/node/.n8n/database.sqlite" \
+    "${BACKUP_SUBDIR}/database.sqlite" 2>/dev/null && \
+    echo "   ✅ database.sqlite ($(du -h "${BACKUP_SUBDIR}/database.sqlite" | cut -f1))" || \
+    echo "   ⚠️  Failed to copy database.sqlite"
+else
+  echo "   ⚠️  n8n pod not found, skipping database backup"
 fi
 
 # ──────────────── Backup Helm release info ────────────────
