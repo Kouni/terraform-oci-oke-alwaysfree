@@ -188,7 +188,7 @@ variable "enable_n8n" {
 }
 
 variable "n8n_namespace" {
-  description = "Kubernetes namespace for n8n and cloudflared deployments"
+  description = "Kubernetes namespace for n8n deployment"
   type        = string
   default     = "n8n"
 }

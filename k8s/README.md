@@ -56,9 +56,9 @@
 ║  │  OKE Cluster (BASIC_CLUSTER, Flannel CNI)                   │ ║
 ║  │  Worker Node: VM.Standard.A1.Flex (ARM64)                   │ ║
 ║  │                         │                                    │ ║
-║  │  ┌─── Namespace: n8n ───┼──────────────────────────────┐    │ ║
-║  │  │                      │                               │    │ ║
-║  │  │   ┌──────────────────▼───────────┐                   │    │ ║
+║  │  ┌── Namespace: tunnel ──┼──────────────────────────────┐    │ ║
+║  │  │                       │                              │    │ ║
+║  │  │   ┌───────────────────▼──────────┐                   │    │ ║
 ║  │  │   │  Deployment: cloudflared     │                   │    │ ║
 ║  │  │   │  ┌─────────────────────────┐ │                   │    │ ║
 ║  │  │   │  │ cloudflare/cloudflared  │ │                   │    │ ║
@@ -68,35 +68,40 @@
 ║  │  │   │  │   (cloudflare-tunnel)   │ │                   │    │ ║
 ║  │  │   │  └───────────┬─────────────┘ │                   │    │ ║
 ║  │  │   └──────────────┼───────────────┘                   │    │ ║
-║  │  │                  │ http://n8n-main:5678              │    │ ║
-║  │  │                  ▼                                    │    │ ║
-║  │  │   ┌──────────────────────────────┐                   │    │ ║
-║  │  │   │  Service: n8n-main           │                   │    │ ║
-║  │  │   │  type: ClusterIP :5678       │                   │    │ ║
-║  │  │   └──────────────┬───────────────┘                   │    │ ║
-║  │  │                  │                                    │    │ ║
-║  │  │   ┌──────────────▼───────────────┐                   │    │ ║
-║  │  │   │  Deployment: n8n-main        │                   │    │ ║
-║  │  │   │  (Helm: official n8n chart)  │                   │    │ ║
-║  │  │   │  ┌─────────────────────────┐ │                   │    │ ║
-║  │  │   │  │ n8nio/n8n:latest        │ │                   │    │ ║
-║  │  │   │  │ Standalone mode (SQLite)│ │                   │    │ ║
-║  │  │   │  │                         │ │                   │    │ ║
-║  │  │   │  │ Secrets ◄── Secret      │ │                   │    │ ║
-║  │  │   │  │   (n8n-secrets)         │ │                   │    │ ║
-║  │  │   │  │   • N8N_ENCRYPTION_KEY  │ │                   │    │ ║
-║  │  │   │  │   • N8N_HOST            │ │                   │    │ ║
-║  │  │   │  │   • N8N_PORT            │ │                   │    │ ║
-║  │  │   │  │   • N8N_PROTOCOL        │ │                   │    │ ║
-║  │  │   │  └───────────┬─────────────┘ │                   │    │ ║
-║  │  │   └──────────────┼───────────────┘                   │    │ ║
-║  │  │                  │ mount: /home/node/.n8n            │    │ ║
-║  │  │                  ▼                                    │    │ ║
-║  │  │   ┌──────────────────────────────┐                   │    │ ║
-║  │  │   │  PVC (StorageClass: nfs)     │                   │    │ ║
-║  │  │   │  AccessMode: ReadWriteOnce   │                   │    │ ║
-║  │  │   └──────────────┬───────────────┘                   │    │ ║
-║  │  │                  │                                    │    │ ║
+║  │  └──────────────────┼───────────────────────────────┘    │ ║
+║  │                     │                                    │ ║
+║  │                     │ http://n8n-main.n8n.svc.cluster.local:5678
+║  │                     │ (cross-namespace DNS)              │ ║
+║  │                     ▼                                    │ ║
+║  │  ┌─── Namespace: n8n ──────────────────────────────┐    │ ║
+║  │  │                                                  │    │ ║
+║  │  │   ┌──────────────────────────────┐               │    │ ║
+║  │  │   │  Service: n8n-main           │               │    │ ║
+║  │  │   │  type: ClusterIP :5678       │               │    │ ║
+║  │  │   └──────────────┬───────────────┘               │    │ ║
+║  │  │                  │                                │    │ ║
+║  │  │   ┌──────────────▼───────────────┐               │    │ ║
+║  │  │   │  Deployment: n8n-main        │               │    │ ║
+║  │  │   │  (Helm: official n8n chart)  │               │    │ ║
+║  │  │   │  ┌─────────────────────────┐ │               │    │ ║
+║  │  │   │  │ n8nio/n8n:latest        │ │               │    │ ║
+║  │  │   │  │ Standalone mode (SQLite)│ │               │    │ ║
+║  │  │   │  │                         │ │               │    │ ║
+║  │  │   │  │ Secrets ◄── Secret      │ │               │    │ ║
+║  │  │   │  │   (n8n-secrets)         │ │               │    │ ║
+║  │  │   │  │   • N8N_ENCRYPTION_KEY  │ │               │    │ ║
+║  │  │   │  │   • N8N_HOST            │ │               │    │ ║
+║  │  │   │  │   • N8N_PORT            │ │               │    │ ║
+║  │  │   │  │   • N8N_PROTOCOL        │ │               │    │ ║
+║  │  │   │  └───────────┬─────────────┘ │               │    │ ║
+║  │  │   └──────────────┼───────────────┘               │    │ ║
+║  │  │                  │ mount: /home/node/.n8n        │    │ ║
+║  │  │                  ▼                                │    │ ║
+║  │  │   ┌──────────────────────────────┐               │    │ ║
+║  │  │   │  PVC (StorageClass: nfs)     │               │    │ ║
+║  │  │   │  AccessMode: ReadWriteOnce   │               │    │ ║
+║  │  │   └──────────────┬───────────────┘               │    │ ║
+║  │  │                  │                                │    │ ║
 ║  │  └──────────────────┼───────────────────────────────┘    │ ║
 ║  │                     ▼                                    │ ║
 ║  │   ┌──────────────────────────────────────┐               │ ║
@@ -131,7 +136,7 @@ n8n Pod ──mount──▶ NFS PVC ──▶ nfs-server-provisioner ──▶ 
 | **Ingress 方式** | Cloudflare Tunnel（非 OCI LB） | OCI LB 非 Always Free；ClusterIP + cloudflared 零成本且等效安全 |
 | **Helm Chart** | n8n 官方 chart | 官方團隊維護，原生支援 Standalone mode |
 | **運行模式** | Standalone（SQLite） | 不需外部 PostgreSQL/Redis，適合 Always Free 單節點 |
-| **cloudflared 部署** | 獨立 Deployment（非 Sidecar） | 官方 chart 不支援 `extraContainers`，獨立部署可獨立更新/重啟 |
+| **cloudflared 部署** | 獨立 Deployment（`tunnel` namespace） | 共享 Tunnel 服務，可供叢集內任何服務使用；官方 chart 不支援 `extraContainers` |
 | **持久化** | NFS StorageClass | 使用既有 nfs-server-provisioner，資料儲存於 OCI Block Volume |
 | **Secrets 管理** | kubectl 手動建立（不進 Terraform state） | 避免敏感資料存入 state 檔案 |
 
@@ -187,10 +192,10 @@ kubectl get nodes
    | Subdomain | `n8n` | 你想要的子網域 |
    | Domain | `your-domain.com` | 你的 Cloudflare 網域 |
    | Type | `HTTP` | n8n 內部走 HTTP |
-   | URL | `n8n-main:5678` | 指向叢集內 n8n Service 的 FQDN |
+   | URL | `n8n-main.n8n.svc.cluster.local:5678` | 跨 namespace 完整 FQDN |
 
-   > ⚠️ Service URL 必須設定為 `n8n-main:5678`（Helm chart 建立的 Service 名稱為 `n8n-main`）。
-   > 完整 FQDN 為 `n8n-main.n8n.svc.cluster.local:5678`，但 cloudflared 同 namespace 可省略。
+   > ⚠️ Service URL 必須設定為 `n8n-main.n8n.svc.cluster.local:5678`。
+   > 因為 cloudflared 位於 `tunnel` namespace，必須使用完整 FQDN 來存取 `n8n` namespace 中的 Service。
 
 8. 儲存設定
 
@@ -256,9 +261,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: cloudflare-tunnel
-  namespace: n8n
-  labels:
-    app.kubernetes.io/part-of: n8n
+  namespace: tunnel
 type: Opaque
 stringData:
   TUNNEL_TOKEN: "<你的 Cloudflare Tunnel Token>"
@@ -275,24 +278,31 @@ stringData:
 依序執行以下指令：
 
 ```bash
-# 建立 namespace
+# 建立 tunnel namespace（Cloudflare Tunnel 共用）
+kubectl apply -f k8s/tunnel-namespace.yaml
+
+# 建立 n8n namespace
 kubectl apply -f k8s/namespace.yaml
 
-# 建立 n8n 核心 secrets
-kubectl apply -f k8s/n8n-secrets.yaml
-
-# 建立 Cloudflare Tunnel token secret
+# 建立 Cloudflare Tunnel token secret（tunnel namespace）
 kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
+
+# 建立 n8n 核心 secrets（n8n namespace）
+kubectl apply -f k8s/n8n-secrets.yaml
 ```
 
 驗證 secrets 已建立：
 
 ```bash
+kubectl get secrets -n tunnel
+# 預期輸出：
+#   NAME                TYPE     DATA   AGE
+#   cloudflare-tunnel   Opaque   1      10s
+
 kubectl get secrets -n n8n
 # 預期輸出：
 #   NAME                TYPE     DATA   AGE
-#   n8n-secrets         Opaque   4      10s
-#   cloudflare-tunnel   Opaque   1      5s
+#   n8n-secrets         Opaque   4      5s
 ```
 
 ---
@@ -321,12 +331,14 @@ enable_n8n = true
 
 | 變數 | 類型 | 預設值 | 說明 |
 |------|------|--------|------|
-| `enable_n8n` | bool | `false` | 是否部署 n8n + cloudflared |
-| `n8n_namespace` | string | `"n8n"` | Kubernetes namespace |
+| `enable_n8n` | bool | `false` | 是否部署 n8n（需同時啟用 cloudflare_tunnel） |
+| `n8n_namespace` | string | `"n8n"` | n8n 部署的 Kubernetes namespace |
 | `n8n_pvc_size` | string | `"5Gi"` | NFS PVC 大小（SQLite DB + workflows） |
 | `n8n_secret_name` | string | `"n8n-secrets"` | 含核心設定的 K8s Secret 名稱 |
 | `cloudflared_secret_name` | string | `"cloudflare-tunnel"` | 含 TUNNEL_TOKEN 的 K8s Secret 名稱 |
 | `n8n_chart_version` | string | `null` | Helm chart 版本（null = latest） |
+| `enable_cloudflare_tunnel` | bool | `false` | 是否部署共享 Cloudflare Tunnel |
+| `cloudflare_tunnel_namespace` | string | `"tunnel"` | Cloudflare Tunnel 部署的 Kubernetes namespace |
 
 ---
 
@@ -355,13 +367,17 @@ Terraform 會建立以下資源：
 ### Step 6：驗證部署
 
 ```bash
-# 確認 Pods 狀態（應有 n8n-main 和 cloudflared 各一個 Pod）
+# 確認 n8n Pod 狀態
 kubectl get pods -n n8n
-
 # 預期輸出：
 #   NAME                          READY   STATUS    RESTARTS   AGE
 #   n8n-main-xxxxxxxxxx-xxxxx     1/1     Running   0          2m
-#   cloudflared-xxxxxxxxxx-xxxxx  1/1     Running   0          1m
+
+# 確認 cloudflared Pod 狀態（在 tunnel namespace）
+kubectl get pods -n tunnel
+# 預期輸出：
+#   NAME                           READY   STATUS    RESTARTS   AGE
+#   cloudflared-xxxxxxxxxx-xxxxx   1/1     Running   0          2m
 
 # 確認 PVC 已 Bound
 kubectl get pvc -n n8n
@@ -370,7 +386,7 @@ kubectl get pvc -n n8n
 kubectl logs -n n8n deployment/n8n-main
 
 # 查看 cloudflared 連線狀態（應顯示 tunnel 已連線）
-kubectl logs -n n8n deployment/cloudflared
+kubectl logs -n tunnel deployment/cloudflared
 
 # 確認 Service 已建立
 kubectl get svc -n n8n
@@ -526,10 +542,10 @@ image: docker.io/nginx:latest
 
 ```bash
 # 查看 cloudflared 日誌
-kubectl logs -n n8n deployment/cloudflared
+kubectl logs -n tunnel deployment/cloudflared
 
 # 確認 secret 內容存在
-kubectl get secret cloudflare-tunnel -n n8n -o jsonpath='{.data.TUNNEL_TOKEN}' | base64 -d
+kubectl get secret cloudflare-tunnel -n tunnel -o jsonpath='{.data.TUNNEL_TOKEN}' | base64 -d
 ```
 
 ### n8n Pod 無法啟動（Pending 狀態）
@@ -598,7 +614,11 @@ enable_n8n         = true
 專案根目錄提供 `backup-n8n.sh` 腳本，一鍵備份所有 n8n 關鍵資料：
 
 ```bash
+# 使用預設 namespace（n8n + tunnel）
 ./backup-n8n.sh
+
+# 自訂 namespace
+./backup-n8n.sh <n8n_namespace> <tunnel_namespace>
 ```
 
 備份內容：
@@ -621,8 +641,8 @@ enable_n8n         = true
 
 ```bash
 # 1. 還原 K8s Secrets
-kubectl apply -f backups/<YYYYMMDDHHMM>/n8n-secrets.yaml
-kubectl apply -f backups/<YYYYMMDDHHMM>/cloudflare-tunnel.yaml
+kubectl apply -f backups/<YYYYMMDDHHMM>/n8n-secrets.yaml           # → n8n namespace
+kubectl apply -f backups/<YYYYMMDDHHMM>/cloudflare-tunnel.yaml     # → tunnel namespace
 
 # 2. 還原 SQLite 資料庫
 N8N_POD=$(kubectl get pod -n n8n -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].metadata.name}')
@@ -666,6 +686,7 @@ kubectl rollout restart deployment/n8n-main -n n8n
    kubectl delete -f k8s/cloudflare-tunnel-secret.yaml
    kubectl delete -f k8s/n8n-secrets.yaml
    kubectl delete -f k8s/namespace.yaml
+   kubectl delete -f k8s/tunnel-namespace.yaml
    ```
 
 4. （可選）移除 Cloudflare Tunnel：
@@ -692,14 +713,15 @@ git checkout -- k8s/n8n-secrets.yaml k8s/cloudflare-tunnel-secret.yaml
 ```
 k8s/
 ├── README.md                       ← 本文件
+├── tunnel-namespace.yaml           ← tunnel namespace（無需修改）
 ├── namespace.yaml                  ← n8n namespace（無需修改）
-├── n8n-secrets.yaml                ← n8n 核心設定 Secret（需手動編輯）
-└── cloudflare-tunnel-secret.yaml   ← Cloudflare Tunnel Token Secret（需手動編輯）
+├── cloudflare-tunnel-secret.yaml   ← Cloudflare Tunnel Token Secret（需手動編輯）
+└── n8n-secrets.yaml                ← n8n 核心設定 Secret（需手動編輯）
 
 backup-n8n.sh                       ← 備份腳本（專案根目錄）
 backups/                            ← 備份輸出目錄（gitignored）
 
 # Terraform 管理的資源（不需手動建立）：
-# main.tf → helm_release.n8n[0]                       Helm: n8n 官方 chart
-# main.tf → kubernetes_deployment_v1.cloudflared[0]    Deployment: cloudflared
+# main.tf → helm_release.n8n[0]                       Helm: n8n 官方 chart（n8n namespace）
+# main.tf → kubernetes_deployment_v1.cloudflared[0]    Deployment: cloudflared（tunnel namespace）
 ```
