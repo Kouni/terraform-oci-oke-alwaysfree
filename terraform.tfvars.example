@@ -43,3 +43,22 @@ notification_email    = "you@example.com"
 #   "alwaysfree" = "true"
 #   "Owner"      = "Kouni"
 # }
+
+# n8n (workflow automation with Cloudflare Zero Trust Tunnel)
+# Prerequisites — run BEFORE terraform apply:
+#   1. Create Cloudflare Tunnel: https://one.dash.cloudflare.com → Networks → Tunnels
+#      - Public Hostname service: http://n8n-main:5678
+#   2. Create K8s secrets:
+#      kubectl create namespace n8n
+#      kubectl create secret generic n8n-secrets --namespace n8n \
+#        --from-literal=N8N_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+#        --from-literal=N8N_HOST="n8n.your-domain.com" \
+#        --from-literal=N8N_PORT="5678" \
+#        --from-literal=N8N_PROTOCOL="http"
+#      kubectl create secret generic cloudflare-tunnel --namespace n8n \
+#        --from-literal=TUNNEL_TOKEN="<your-cloudflare-tunnel-token>"
+# enable_n8n              = false
+# n8n_namespace           = "n8n"
+# n8n_pvc_size            = "5Gi"
+# n8n_secret_name         = "n8n-secrets"
+# cloudflared_secret_name = "cloudflare-tunnel"
