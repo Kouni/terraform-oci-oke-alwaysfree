@@ -8,6 +8,7 @@
 set -euo pipefail
 
 NAMESPACE="${1:-n8n}"
+TUNNEL_NS="${2:-tunnel}"
 MAX_BACKUPS=7
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="${SCRIPT_DIR}/backups"
@@ -24,14 +25,20 @@ mkdir -p "${BACKUP_SUBDIR}"
 
 # ──────────────── Backup Secrets (YAML) ────────────────
 echo "📦 Exporting Kubernetes Secrets..."
-for secret in n8n-secrets cloudflare-tunnel; do
+for secret in n8n-secrets; do
   if kubectl get secret "${secret}" -n "${NAMESPACE}" >/dev/null 2>&1; then
     kubectl get secret "${secret}" -n "${NAMESPACE}" -o yaml > "${BACKUP_SUBDIR}/${secret}.yaml"
-    echo "   ✅ ${secret}"
+    echo "   ✅ ${secret} (ns: ${NAMESPACE})"
   else
-    echo "   ⚠️  ${secret} not found, skipping"
+    echo "   ⚠️  ${secret} not found in ${NAMESPACE}, skipping"
   fi
 done
+if kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" >/dev/null 2>&1; then
+  kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" -o yaml > "${BACKUP_SUBDIR}/cloudflare-tunnel.yaml"
+  echo "   ✅ cloudflare-tunnel (ns: ${TUNNEL_NS})"
+else
+  echo "   ⚠️  cloudflare-tunnel not found in ${TUNNEL_NS}, skipping"
+fi
 
 # ──────────────── Extract plaintext keys (for password manager) ────────────────
 echo "🔑 Extracting plaintext keys..."
@@ -51,9 +58,9 @@ if kubectl get secret n8n-secrets -n "${NAMESPACE}" >/dev/null 2>&1; then
   echo "" >> "${KEYS_FILE}"
 fi
 
-if kubectl get secret cloudflare-tunnel -n "${NAMESPACE}" >/dev/null 2>&1; then
-  echo "## cloudflare-tunnel" >> "${KEYS_FILE}"
-  val=$(kubectl get secret cloudflare-tunnel -n "${NAMESPACE}" -o jsonpath='{.data.TUNNEL_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || echo "<not found>")
+if kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" >/dev/null 2>&1; then
+  echo "## cloudflare-tunnel (namespace: ${TUNNEL_NS})" >> "${KEYS_FILE}"
+  val=$(kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" -o jsonpath='{.data.TUNNEL_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || echo "<not found>")
   echo "TUNNEL_TOKEN=${val}" >> "${KEYS_FILE}"
   echo "" >> "${KEYS_FILE}"
 fi

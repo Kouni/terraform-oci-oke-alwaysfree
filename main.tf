@@ -232,19 +232,22 @@ resource "helm_release" "n8n" {
       condition     = var.enable_nfs_storage
       error_message = "enable_nfs_storage must be true when enable_n8n is true (n8n requires the NFS StorageClass)."
     }
+    precondition {
+      condition     = var.enable_cloudflare_tunnel
+      error_message = "enable_cloudflare_tunnel must be true when enable_n8n is true (n8n requires Cloudflare Tunnel for ingress)."
+    }
   }
 }
 
 resource "kubernetes_deployment_v1" "cloudflared" {
-  count = var.enable_n8n ? 1 : 0
+  count = var.enable_cloudflare_tunnel ? 1 : 0
 
   metadata {
     name      = "cloudflared"
-    namespace = var.n8n_namespace
+    namespace = var.cloudflare_tunnel_namespace
     labels = {
       "app.kubernetes.io/name"      = "cloudflared"
       "app.kubernetes.io/component" = "tunnel"
-      "app.kubernetes.io/part-of"   = "n8n"
     }
   }
 
@@ -262,7 +265,6 @@ resource "kubernetes_deployment_v1" "cloudflared" {
         labels = {
           "app.kubernetes.io/name"      = "cloudflared"
           "app.kubernetes.io/component" = "tunnel"
-          "app.kubernetes.io/part-of"   = "n8n"
         }
       }
 
@@ -306,5 +308,5 @@ resource "kubernetes_deployment_v1" "cloudflared" {
     }
   }
 
-  depends_on = [helm_release.n8n]
+  depends_on = [terraform_data.always_free_validation]
 }

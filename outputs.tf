@@ -36,11 +36,14 @@ output "n8n_namespace" {
 output "n8n_setup_instructions" {
   description = "Instructions to create required K8s secrets before enabling n8n"
   value       = <<-EOT
-    # Prerequisites — run BEFORE terraform apply with enable_n8n = true:
-    # 1. Edit k8s/n8n-secrets.yaml and k8s/cloudflare-tunnel-secret.yaml with your values
-    # 2. Apply manifests:
+    # Prerequisites — run BEFORE terraform apply:
+    #
+    # 1. Cloudflare Tunnel (for enable_cloudflare_tunnel = true):
+    kubectl apply -f k8s/tunnel-namespace.yaml
+    kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
+    #
+    # 2. n8n (for enable_n8n = true):
     kubectl apply -f k8s/namespace.yaml
     kubectl apply -f k8s/n8n-secrets.yaml
-    kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
   EOT
 }
