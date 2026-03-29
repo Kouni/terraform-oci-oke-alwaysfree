@@ -33,6 +33,11 @@ output "n8n_namespace" {
   value       = var.enable_n8n ? var.n8n_namespace : null
 }
 
+output "monitoring_namespace" {
+  description = "Kubernetes namespace where monitoring components are deployed (null if monitoring is disabled)"
+  value       = var.enable_grafana_monitoring ? module.monitoring[0].namespace : null
+}
+
 output "n8n_setup_instructions" {
   description = "Instructions to create required K8s secrets before enabling n8n"
   value       = <<-EOT

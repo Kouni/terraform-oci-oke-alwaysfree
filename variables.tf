@@ -217,6 +217,51 @@ variable "n8n_chart_version" {
   default     = null
 }
 
+# ──────────────── Grafana Cloud Monitoring ────────────────
+
+variable "enable_grafana_monitoring" {
+  description = "Deploy Grafana Alloy and kube-state-metrics to ship metrics and logs to Grafana Cloud Free Plan"
+  type        = bool
+  default     = false
+}
+
+variable "grafana_cloud_prometheus_url" {
+  description = "Grafana Cloud Prometheus remote write endpoint (e.g. https://prometheus-prod-xx-xxx.grafana.net/api/prom/push)"
+  type        = string
+  default     = null
+}
+
+variable "grafana_cloud_prometheus_username" {
+  description = "Grafana Cloud Prometheus instance ID (numeric). Found in Grafana Cloud → Prometheus → Details"
+  type        = string
+  default     = null
+}
+
+variable "grafana_cloud_loki_url" {
+  description = "Grafana Cloud Loki push endpoint (e.g. https://logs-prod-xxx.grafana.net/loki/api/v1/push)"
+  type        = string
+  default     = null
+}
+
+variable "grafana_cloud_loki_username" {
+  description = "Grafana Cloud Loki instance ID (numeric). Found in Grafana Cloud → Loki → Details"
+  type        = string
+  default     = null
+}
+
+variable "grafana_cloud_api_key" {
+  description = "Grafana Cloud API token with MetricsPublisher and LogsPublisher scopes"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "monitoring_namespace" {
+  description = "Kubernetes namespace for Grafana monitoring components"
+  type        = string
+  default     = "monitoring"
+}
+
 # ──────────────── Cloudflare Tunnel ────────────────
 
 variable "enable_cloudflare_tunnel" {
