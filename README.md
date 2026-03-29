@@ -114,11 +114,20 @@ kubectl get nodes
 | `enable_nat_gateway` | Enable NAT Gateway (costs $) | `bool` | `false` | no |
 | `enable_budget_alert` | Enable OCI Budget alert | `bool` | `true` | no |
 | `notification_email` | Email for budget alerts | `string` | `null` | no** |
+| `enable_grafana_monitoring` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
+| `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no*** |
+| `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no*** |
+| `grafana_cloud_loki_url` | Grafana Cloud Loki push endpoint | `string` | `null` | no*** |
+| `grafana_cloud_loki_username` | Grafana Cloud Loki instance ID | `string` | `null` | no*** |
+| `grafana_cloud_api_key` | Grafana Cloud API token (sensitive) | `string` | `null` | no*** |
+| `monitoring_namespace` | K8s namespace for monitoring | `string` | `"monitoring"` | no |
 | `freeform_tags` | Tags for all resources | `map(string)` | `{"alwaysfree"="true"}` | no |
 
 *Either provide `tenancy_ocid` + `user_ocid` + `fingerprint` + `private_key_path` + `region`, or use `config_file_profile`.
 
 **Required when `enable_budget_alert = true`.
+
+***Required when `enable_grafana_monitoring = true`.
 
 ## Outputs
 
@@ -131,6 +140,7 @@ kubectl get nodes
 | `nfs_storage_class` | NFS StorageClass name (`"nfs"`) for dynamic PV provisioning (null if disabled) |
 | `budget_id` | The OCID of the budget (null if disabled) |
 | `n8n_namespace` | Kubernetes namespace where n8n is deployed (null if disabled) |
+| `monitoring_namespace` | Kubernetes namespace where monitoring is deployed (null if disabled) |
 | `n8n_setup_instructions` | Step-by-step instructions for n8n setup (null if disabled) |
 
 ## Cloudflare Zero Trust Tunnel Setup
@@ -156,3 +166,47 @@ terraform apply
 ```
 
 This approach eliminates the need for inbound ports, providing security through Cloudflare's Zero Trust network.
+
+## Grafana Cloud Monitoring
+
+Ships cluster metrics and container logs to [Grafana Cloud Free Plan](https://grafana.com/products/cloud/) using **Grafana Alloy** (unified collector) and **kube-state-metrics**.
+
+### What Gets Monitored
+
+| Type | Data | Source |
+|------|------|--------|
+| Metrics | Container CPU, memory, network, filesystem | kubelet cAdvisor |
+| Metrics | Node capacity, allocatable resources | kubelet |
+| Metrics | Pod status, restarts, deployment replicas | kube-state-metrics |
+| Logs | All container stdout/stderr | Kubernetes API |
+| Logs | Kubernetes events (warnings, errors) | Kubernetes API |
+
+### Free Plan Limits
+
+- **10,000** active metric series (estimated usage: ~1,500–2,000)
+- **50 GB/month** log ingestion (estimated usage: < 1 GB)
+- **14-day** metric retention, **30-day** log retention
+
+### Setup
+
+```bash
+# 1. Get credentials from Grafana Cloud Portal:
+#    - Prometheus remote_write URL and username
+#    - Loki push URL and username
+#    - API token (MetricsPublisher role)
+
+# 2. Add to terraform.tfvars:
+#    enable_grafana_monitoring         = true
+#    grafana_cloud_prometheus_url      = "https://prometheus-prod-xx-xxx.grafana.net/api/prom/push"
+#    grafana_cloud_prometheus_username = "123456"
+#    grafana_cloud_loki_url            = "https://logs-prod-xxx.grafana.net/loki/api/v1/push"
+#    grafana_cloud_loki_username       = "654321"
+#    grafana_cloud_api_key             = "glc_xxxxxxxxxxxxx"
+
+# 3. Deploy
+terraform apply
+```
+
+### Resource Overhead
+
+~70m CPU request, ~210 Mi memory request — less than 1% of the ARM A1.Flex node capacity.

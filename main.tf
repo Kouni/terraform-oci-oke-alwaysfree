@@ -239,6 +239,55 @@ resource "helm_release" "n8n" {
   }
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Grafana Cloud Monitoring (metrics + logs)
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "terraform_data" "grafana_monitoring_validation" {
+  count = var.enable_grafana_monitoring ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = var.grafana_cloud_prometheus_url != null
+      error_message = "grafana_cloud_prometheus_url is required when enable_grafana_monitoring is true."
+    }
+    precondition {
+      condition     = var.grafana_cloud_prometheus_username != null
+      error_message = "grafana_cloud_prometheus_username is required when enable_grafana_monitoring is true."
+    }
+    precondition {
+      condition     = var.grafana_cloud_loki_url != null
+      error_message = "grafana_cloud_loki_url is required when enable_grafana_monitoring is true."
+    }
+    precondition {
+      condition     = var.grafana_cloud_loki_username != null
+      error_message = "grafana_cloud_loki_username is required when enable_grafana_monitoring is true."
+    }
+    precondition {
+      condition     = var.grafana_cloud_api_key != null
+      error_message = "grafana_cloud_api_key is required when enable_grafana_monitoring is true."
+    }
+  }
+}
+
+module "monitoring" {
+  source = "./modules/monitoring"
+  count  = var.enable_grafana_monitoring ? 1 : 0
+
+  grafana_cloud_prometheus_url      = var.grafana_cloud_prometheus_url
+  grafana_cloud_prometheus_username = var.grafana_cloud_prometheus_username
+  grafana_cloud_loki_url            = var.grafana_cloud_loki_url
+  grafana_cloud_loki_username       = var.grafana_cloud_loki_username
+  grafana_cloud_api_key             = var.grafana_cloud_api_key
+  namespace                         = var.monitoring_namespace
+
+  depends_on = [module.oke, terraform_data.grafana_monitoring_validation]
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Cloudflare Tunnel
+# ──────────────────────────────────────────────────────────────────────────────
+
 resource "kubernetes_deployment_v1" "cloudflared" {
   count = var.enable_cloudflare_tunnel ? 1 : 0
 
