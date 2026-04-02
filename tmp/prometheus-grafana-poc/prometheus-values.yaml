@@ -1,0 +1,51 @@
+# prometheus-values.yaml
+
+# ── 停用不需要的 subcharts ──────────────────────────────────
+# kube-state-metrics 已在 monitoring namespace 運行
+kube-state-metrics:
+  enabled: false
+
+# node-exporter 需要 hostNetwork + hostPID，PoC 先略過
+prometheus-node-exporter:
+  enabled: false
+
+# ── Prometheus Server ───────────────────────────────────────
+server:
+  # 資源限制（Always Free 友好）
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  # 資料保留 7 天（PoC 足夠，節省 NFS 空間）
+  retention: "7d"
+
+  # PVC：使用現有 NFS StorageClass
+  persistentVolume:
+    enabled: true
+    storageClass: "nfs"
+    size: 10Gi
+
+  # service type（ClusterIP 即可，透過 Tunnel 對外）
+  service:
+    type: ClusterIP
+
+  # 設定額外 scrape job：scrape 現有 monitoring namespace 的 kube-state-metrics
+  extraScrapeConfigs: |
+    - job_name: 'kube-state-metrics'
+      static_configs:
+        - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
+
+# ── Alertmanager：啟用，強制走 nfs SC ────────────────────────
+alertmanager:
+  enabled: true
+  persistentVolume:
+    storageClass: "nfs"
+    size: 2Gi
+
+# ── Pushgateway：啟用（Deployment，無 PVC）───────────────────
+prometheus-pushgateway:
+  enabled: true
