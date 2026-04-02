@@ -9,25 +9,61 @@
 
 ## 架構概覽
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  OKE Cluster (1 node · 4 OCPU · 24 GB RAM · ARM64)      │
-│                                                           │
-│  namespace: monitoring (現有)                             │
-│  ├── alloy (DaemonSet)  ──────────────→ Grafana Cloud    │
-│  └── kube-state-metrics                                   │
-│                                                           │
-│  namespace: observability (新增)                          │
-│  ├── prometheus-server (Deployment + PVC 10Gi)           │
-│  │     └── scrapes: kubelet, cAdvisor, kube-state-metrics│
-│  └── grafana (Deployment + PVC 5Gi)                      │
-│        └── datasource → prometheus-server:80             │
-│                                                           │
-│  namespace: tunnel (現有)                                 │
-│  └── cloudflared  ──→ Cloudflare Edge                    │
-│                         ├── grafana.your-domain.com       │
-│                         └── prometheus.your-domain.com    │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    Browser["🌍 Browser"]
+    CF["☁️ Cloudflare Edge<br/>(Zero Trust + Access)"]
+
+    subgraph OKE["OKE Cluster — VM.Standard.A1.Flex (4 OCPU · 24 GB · ARM64)"]
+
+        subgraph NS_TUNNEL["namespace: tunnel (現有)"]
+            CFD["cloudflared<br/>(outbound connector)"]
+        end
+
+        subgraph NS_OBS["namespace: observability (新增)"]
+            PROM["📊 prometheus-server<br/>Deployment · PVC 10 Gi · 7d retention"]
+            GRAF["📈 grafana<br/>Deployment · PVC 5 Gi"]
+        end
+
+        subgraph NS_MON["namespace: monitoring (現有)"]
+            ALLOY["alloy<br/>(DaemonSet)"]
+            KSM["kube-state-metrics<br/>:8080"]
+        end
+
+        KUBELET["kubelet / cAdvisor<br/>(node metrics API)"]
+
+    end
+
+    GC["☁️ Grafana Cloud<br/>(Prometheus + Loki)"]
+
+    Browser -->|"HTTPS"| CF
+    CF -->|"grafana.your-domain.com"| CFD
+    CF -->|"prometheus.your-domain.com"| CFD
+    CFD -->|"http :80"| GRAF
+    CFD -->|"http :80"| PROM
+
+    GRAF -->|"PromQL datasource"| PROM
+    PROM -->|"scrape :8080"| KSM
+    PROM -->|"scrape via API proxy"| KUBELET
+
+    ALLOY -->|"scrape :8080"| KSM
+    ALLOY -->|"scrape via API proxy"| KUBELET
+    ALLOY -->|"remote_write / loki.write"| GC
+
+    classDef external fill:#e65100,color:#fff,stroke:#ff6d00,stroke-width:2px
+    classDef new_ns fill:#1a237e,color:#fff,stroke:#5c6bc0,stroke-width:1px
+    classDef existing fill:#2e7d32,color:#fff,stroke:#66bb6a,stroke-width:1px
+    classDef infra fill:#37474f,color:#fff,stroke:#78909c,stroke-width:1px
+
+    class Browser,CF,GC external
+    class PROM,GRAF new_ns
+    class CFD,ALLOY,KSM existing
+    class KUBELET infra
+
+    style NS_TUNNEL fill:#1b3a1b,color:#fff,stroke:#66bb6a,stroke-width:1px,stroke-dasharray:4 4
+    style NS_OBS fill:#0d1b4a,color:#fff,stroke:#5c6bc0,stroke-width:2px
+    style NS_MON fill:#1b3a1b,color:#fff,stroke:#66bb6a,stroke-width:1px,stroke-dasharray:4 4
+    style OKE fill:#1c2833,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:6 4
 ```
 
 **設計決策：**
