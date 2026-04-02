@@ -91,7 +91,8 @@ graph TB
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add grafana https://grafana.github.io/helm-charts
+# grafana/grafana chart 已於 2026/01/30 遷移至 grafana-community repo
+helm repo add grafana-community https://grafana-community.github.io/helm-charts
 helm repo update
 ```
 
@@ -155,11 +156,13 @@ server:
 
 # ── Alertmanager ────────────────────────────────────────────
 alertmanager:
-  enabled: false
+#  enabled: false
+  enabled: true
 
 # ── Pushgateway ─────────────────────────────────────────────
 prometheus-pushgateway:
-  enabled: false
+#  enabled: false
+  enabled: true
 ```
 
 ### 3.2 安裝
@@ -169,6 +172,44 @@ helm install prometheus prometheus-community/prometheus \
   --namespace observability \
   --values prometheus-values.yaml \
   --wait
+---
+$ helm upgrade --install prometheus prometheus-community/prometheus --namespace observability --values tmp/prometheus-grafana-poc/prometheus-values.yaml --wait
+Release "prometheus" does not exist. Installing it now.
+NAME: prometheus
+LAST DEPLOYED: Fri Apr  3 00:48:02 2026
+NAMESPACE: observability
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+The Prometheus server can be accessed via port 80 on the following DNS name from within your cluster:
+prometheus-server.observability.svc.cluster.local
+
+
+Get the Prometheus server URL by running these commands in the same shell:
+  export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=prometheus,app.kubernetes.io/instance=prometheus" -o jsonpath="{.items[0].metadata.name}")
+  kubectl --namespace observability port-forward $POD_NAME 9090
+
+Prometheus alertmanager can be accessed via port 9093 on the following DNS name from within your cluster:
+prometheus-alertmanager.observability.svc.cluster.local
+
+
+Get the Alertmanager URL by running these commands in the same shell:
+  export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=alertmanager,app.kubernetes.io/instance=prometheus" -o jsonpath="{.items[0].metadata.name}")
+  kubectl --namespace observability port-forward $POD_NAME 9093
+
+Prometheus Pushgateway can be accessed via port 9091 on the following DNS name from within your cluster:
+prometheus-prometheus-pushgateway.observability.svc.cluster.local
+
+
+Get the Pushgateway URL by running these commands in the same shell:
+  export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=prometheus-pushgateway,app.kubernetes.io/instance=prometheus" -o jsonpath="{.items[0].metadata.name}")
+  kubectl --namespace observability port-forward $POD_NAME 9091
+
+For more information on running Prometheus, visit:
+https://prometheus.io/
+
 ```
 
 ### 3.3 確認 Pod 狀態
@@ -245,7 +286,7 @@ testFramework:
 ### 4.3 安裝
 
 ```bash
-helm install grafana grafana/grafana \
+helm install grafana grafana-community/grafana \
   --namespace observability \
   --values grafana-values.yaml \
   --wait
@@ -444,7 +485,7 @@ helm upgrade prometheus prometheus-community/prometheus \
   --values prometheus-values.yaml
 
 # 升級 Grafana
-helm upgrade grafana grafana/grafana \
+helm upgrade grafana grafana-community/grafana \
   --namespace observability \
   --values grafana-values.yaml
 ```
