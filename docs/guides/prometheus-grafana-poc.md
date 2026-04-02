@@ -154,18 +154,21 @@ server:
       static_configs:
         - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
 
-# ── Alertmanager：停用（PoC 不需要，且預設會建 oci-bv PVC）──
+# ── Alertmanager：啟用，強制走 nfs SC（避免建立 oci-bv PVC）──
 alertmanager:
-  enabled: false
+  enabled: true
+  persistentVolume:
+    storageClass: "nfs"
+    size: 2Gi
 
-# ── Pushgateway：停用（PoC 不需要）───────────────────────────
+# ── Pushgateway：啟用（Deployment，無 PVC）───────────────────
 prometheus-pushgateway:
-  enabled: false
+  enabled: true
 ```
 
-> ⚠️ **重要**：`alertmanager` 與 `prometheus-pushgateway` 必須設為 `enabled: false`。
-> 若保持預設 `true`，它們的 PVC 會使用 cluster 預設 StorageClass (`oci-bv`)，
-> 建立額外的 OCI Block Volume，超出 Always Free 200 GiB 配額而產生費用。
+> ⚠️ **重要**：若 `alertmanager.persistentVolume.storageClass` 未設定，
+> 會 fallback 到 cluster 預設 StorageClass (`oci-bv`)，建立額外的 OCI Block Volume，
+> 超出 Always Free 200 GiB 配額而產生費用。必須明確指定 `nfs`。
 
 ### 3.2 安裝
 
@@ -446,15 +449,18 @@ kubectl get pvc -n observability
 | 工作負載 | CPU request | Memory request |
 |----------|-------------|----------------|
 | prometheus-server | 200m | 512 Mi |
+| prometheus-alertmanager | 10m | 32 Mi |
+| prometheus-pushgateway | 10m | 32 Mi |
 | grafana | 100m | 128 Mi |
-| **新增合計** | **300m** | **640 Mi** |
+| **新增合計** | **~320m** | **~704 Mi** |
 | 原有工作負載（alloy, ksm, n8n, cloudflared…） | ~700m | ~1.5 GB |
-| **全部合計** | **~1 OCPU** | **~2.1 GB** |
+| **全部合計** | **~1 OCPU** | **~2.2 GB** |
 
-剩餘容量：~3 OCPU、~21.9 GB RAM → 充裕。
+剩餘容量：~3 OCPU、~21.8 GB RAM → 充裕。
 
 **Storage（NFS 136 GB）：**
 - prometheus-server PVC: 10 Gi
+- prometheus-alertmanager PVC: 2 Gi
 - grafana PVC: 5 Gi
 - n8n（現有）: 依現有設定
 - 剩餘供未來使用
