@@ -138,7 +138,7 @@ server:
   # 資料保留 7 天（PoC 足夠，節省 NFS 空間）
   retention: "7d"
 
-  # PVC：使用現有 NFS StorageClass
+  # PVC：強制使用 nfs StorageClass（吃 136Gi NFS 那塊）
   persistentVolume:
     enabled: true
     storageClass: "nfs"
@@ -154,16 +154,18 @@ server:
       static_configs:
         - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
 
-# ── Alertmanager ────────────────────────────────────────────
+# ── Alertmanager：停用（PoC 不需要，且預設會建 oci-bv PVC）──
 alertmanager:
-#  enabled: false
-  enabled: true
+  enabled: false
 
-# ── Pushgateway ─────────────────────────────────────────────
+# ── Pushgateway：停用（PoC 不需要）───────────────────────────
 prometheus-pushgateway:
-#  enabled: false
-  enabled: true
+  enabled: false
 ```
+
+> ⚠️ **重要**：`alertmanager` 與 `prometheus-pushgateway` 必須設為 `enabled: false`。
+> 若保持預設 `true`，它們的 PVC 會使用 cluster 預設 StorageClass (`oci-bv`)，
+> 建立額外的 OCI Block Volume，超出 Always Free 200 GiB 配額而產生費用。
 
 ### 3.2 安裝
 
@@ -172,44 +174,6 @@ helm install prometheus prometheus-community/prometheus \
   --namespace observability \
   --values prometheus-values.yaml \
   --wait
----
-$ helm upgrade --install prometheus prometheus-community/prometheus --namespace observability --values tmp/prometheus-grafana-poc/prometheus-values.yaml --wait
-Release "prometheus" does not exist. Installing it now.
-NAME: prometheus
-LAST DEPLOYED: Fri Apr  3 00:48:02 2026
-NAMESPACE: observability
-STATUS: deployed
-REVISION: 1
-DESCRIPTION: Install complete
-TEST SUITE: None
-NOTES:
-The Prometheus server can be accessed via port 80 on the following DNS name from within your cluster:
-prometheus-server.observability.svc.cluster.local
-
-
-Get the Prometheus server URL by running these commands in the same shell:
-  export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=prometheus,app.kubernetes.io/instance=prometheus" -o jsonpath="{.items[0].metadata.name}")
-  kubectl --namespace observability port-forward $POD_NAME 9090
-
-Prometheus alertmanager can be accessed via port 9093 on the following DNS name from within your cluster:
-prometheus-alertmanager.observability.svc.cluster.local
-
-
-Get the Alertmanager URL by running these commands in the same shell:
-  export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=alertmanager,app.kubernetes.io/instance=prometheus" -o jsonpath="{.items[0].metadata.name}")
-  kubectl --namespace observability port-forward $POD_NAME 9093
-
-Prometheus Pushgateway can be accessed via port 9091 on the following DNS name from within your cluster:
-prometheus-prometheus-pushgateway.observability.svc.cluster.local
-
-
-Get the Pushgateway URL by running these commands in the same shell:
-  export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=prometheus-pushgateway,app.kubernetes.io/instance=prometheus" -o jsonpath="{.items[0].metadata.name}")
-  kubectl --namespace observability port-forward $POD_NAME 9091
-
-For more information on running Prometheus, visit:
-https://prometheus.io/
-
 ```
 
 ### 3.3 確認 Pod 狀態
@@ -286,10 +250,34 @@ testFramework:
 ### 4.3 安裝
 
 ```bash
-helm install grafana grafana-community/grafana \
+helm upgrade --install grafana grafana-community/grafana \
   --namespace observability \
-  --values grafana-values.yaml \
+  --values tmp/prometheus-grafana-poc/grafana-values.yaml \
   --wait
+---
+Release "grafana" does not exist. Installing it now.
+NAME: grafana
+LAST DEPLOYED: Fri Apr  3 01:03:35 2026
+NAMESPACE: observability
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+1. Get your 'admin' user password by running:
+
+   kubectl get secret --namespace observability grafana-admin-secret -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+
+
+2. The Grafana server can be accessed via port 80 on the following DNS name from within your cluster:
+
+   grafana.observability.svc.cluster.local
+
+   Get the Grafana URL to visit by running these commands in the same shell:
+     export POD_NAME=$(kubectl get pods --namespace observability -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=grafana" -o jsonpath="{.items[0].metadata.name}")
+     kubectl --namespace observability port-forward $POD_NAME 3000
+
+3. Login with the password from step 1 and the username: admin
 ```
 
 ### 4.4 確認 Pod 狀態
