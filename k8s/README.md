@@ -693,7 +693,9 @@ k8s/
 ├── tunnel-namespace.yaml           ← tunnel namespace（無需修改）
 ├── namespace.yaml                  ← n8n namespace（無需修改）
 ├── cloudflare-tunnel-secret.yaml   ← Cloudflare Tunnel Token Secret（需手動編輯）
-└── n8n-secrets.yaml                ← n8n 核心設定 Secret（需手動編輯）
+├── n8n-secrets.yaml                ← n8n 核心設定 Secret（需手動編輯）
+├── hedgedoc-namespace.yaml         ← HedgeDoc namespace（手動部署用，非 Terraform 管理）
+└── hedgedoc-secrets.yaml           ← HedgeDoc Secret 範本（手動部署用，非 Terraform 管理）
 
 backup-n8n.sh                       ← 備份腳本（專案根目錄）
 backups/                            ← 備份輸出目錄（gitignored）
@@ -702,3 +704,5 @@ backups/                            ← 備份輸出目錄（gitignored）
 # main.tf → helm_release.n8n[0]                       Helm: n8n 官方 chart（n8n namespace）
 # main.tf → kubernetes_deployment_v1.cloudflared[0]    Deployment: cloudflared（tunnel namespace）
 ```
+
+> ℹ️ `hedgedoc-namespace.yaml` 和 `hedgedoc-secrets.yaml` 為手動部署的 HedgeDoc 參考範本，不受 Terraform 管理。詳見 `docs/guides/hedgedoc-deployment.md`。

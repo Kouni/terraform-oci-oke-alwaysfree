@@ -262,6 +262,18 @@ variable "monitoring_namespace" {
   default     = "monitoring"
 }
 
+variable "alloy_chart_version" {
+  description = "Grafana Alloy Helm chart version. If null, uses the latest available version"
+  type        = string
+  default     = null
+}
+
+variable "kube_state_metrics_chart_version" {
+  description = "kube-state-metrics Helm chart version. If null, uses the latest available version"
+  type        = string
+  default     = null
+}
+
 # ──────────────── Cloudflare Tunnel ────────────────
 
 variable "enable_cloudflare_tunnel" {

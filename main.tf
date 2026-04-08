@@ -280,6 +280,8 @@ module "monitoring" {
   grafana_cloud_loki_username       = var.grafana_cloud_loki_username
   grafana_cloud_api_key             = var.grafana_cloud_api_key
   namespace                         = var.monitoring_namespace
+  alloy_chart_version               = var.alloy_chart_version
+  kube_state_metrics_chart_version  = var.kube_state_metrics_chart_version
 
   depends_on = [module.oke, terraform_data.grafana_monitoring_validation]
 }
