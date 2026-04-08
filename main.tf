@@ -227,6 +227,11 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
     prevent_destroy = true
     # PVC spec is immutable after binding; ignore any drift
     ignore_changes = [spec]
+
+    precondition {
+      condition     = var.enable_nfs_storage
+      error_message = "kubernetes_persistent_volume_claim_v1.n8n_data requires the NFS StorageClass. Set enable_nfs_storage = true before applying."
+    }
   }
 
   depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]

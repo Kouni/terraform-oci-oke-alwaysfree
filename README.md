@@ -154,11 +154,14 @@ kubectl get nodes
 | `enable_cloudflare_tunnel` | Deploy shared Cloudflare Zero Trust Tunnel | `bool` | `false` | no |
 | `cloudflare_tunnel_namespace` | K8s namespace for Cloudflare Tunnel | `string` | `"tunnel"` | no |
 | `cloudflared_secret_name` | K8s Secret name containing `TUNNEL_TOKEN` | `string` | `"cloudflare-tunnel"` | no |
+| `cloudflare_tunnel_token` | Cloudflare Zero Trust tunnel token | `string` | `null` | no***** |
 | `enable_n8n` | Deploy n8n workflow automation | `bool` | `false` | no |
 | `n8n_namespace` | K8s namespace for n8n | `string` | `"n8n"` | no |
 | `n8n_pvc_size` | PVC size for n8n persistent data | `string` | `"5Gi"` | no |
 | `n8n_secret_name` | K8s Secret name containing n8n configuration | `string` | `"n8n-secrets"` | no |
 | `n8n_chart_version` | n8n Helm chart version (null = latest) | `string` | `null` | no |
+| `n8n_encryption_key` | Encryption key for n8n credentials. Generate: `openssl rand -hex 32` | `string` | `null` | no**** |
+| `n8n_host` | Public hostname for n8n (e.g. `n8n.example.com`) | `string` | `null` | no**** |
 | `enable_grafana_monitoring` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
 | `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no*** |
 | `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no*** |
@@ -176,6 +179,10 @@ kubectl get nodes
 
 ***Required when `enable_grafana_monitoring = true`.
 
+****Required when `enable_n8n = true`.
+
+*****Required when `enable_cloudflare_tunnel = true`.
+
 ## Outputs
 
 | Name | Description |
@@ -186,29 +193,26 @@ kubectl get nodes
 | `kubeconfig_command` | OCI CLI command to generate kubeconfig |
 | `nfs_storage_class` | NFS StorageClass name (`"nfs"`) for dynamic PV provisioning (null if disabled) |
 | `budget_id` | The OCID of the budget (null if disabled) |
-| `n8n_namespace` | Kubernetes namespace where n8n is deployed (null if disabled) |
+| `n8n_namespace` | Kubernetes namespace for n8n (always created; persists when `enable_n8n = false`) |
 | `monitoring_namespace` | Kubernetes namespace where monitoring is deployed (null if disabled) |
-| `n8n_setup_instructions` | Step-by-step instructions for n8n setup (null if disabled) |
+| `n8n_setup_instructions` | Required `terraform.tfvars` variables for enabling n8n and Cloudflare Tunnel |
 
 ## Cloudflare Zero Trust Tunnel Setup
 
-Cloudflare Tunnel is managed via Terraform as a shared service in the `tunnel` namespace.
-See [k8s/README.md](k8s/README.md) for the detailed deployment guide.
+Cloudflare Tunnel is managed entirely via Terraform. Namespaces, secrets, and the `cloudflared` Deployment are all declared in root `main.tf` — no manual `kubectl apply` required.
+
+See [k8s/README.md](k8s/README.md) for architecture details and troubleshooting.
 
 ```bash
-# Quick start:
-# 1. Create namespaces and secrets
-kubectl apply -f k8s/tunnel-namespace.yaml
-kubectl apply -f k8s/namespace.yaml
-# Edit k8s/cloudflare-tunnel-secret.yaml and k8s/n8n-secrets.yaml with real values, then:
-kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
-kubectl apply -f k8s/n8n-secrets.yaml
-
-# 2. Enable in terraform.tfvars
+# 1. Add to terraform.tfvars:
 #    enable_cloudflare_tunnel = true
+#    cloudflare_tunnel_token  = "<token from Cloudflare Dashboard → Networks → Tunnels>"
+#
 #    enable_n8n               = true
+#    n8n_host                 = "<your-n8n-hostname>"
+#    n8n_encryption_key       = "$(openssl rand -hex 32)"  # generate once; never rotate
 
-# 3. Deploy
+# 2. Deploy
 terraform apply
 ```
 

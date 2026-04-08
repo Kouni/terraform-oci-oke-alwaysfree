@@ -29,8 +29,8 @@ output "budget_id" {
 }
 
 output "n8n_namespace" {
-  description = "Kubernetes namespace where n8n is deployed (null if n8n is disabled)"
-  value       = var.enable_n8n ? var.n8n_namespace : null
+  description = "Kubernetes namespace for n8n (always created; PVC and namespace persist even when enable_n8n = false)"
+  value       = kubernetes_namespace_v1.n8n.metadata[0].name
 }
 
 output "monitoring_namespace" {
