@@ -7,6 +7,7 @@ Terraform module to deploy an OKE (Oracle Kubernetes Engine) cluster using only 
 ```mermaid
 graph TB
     CF["☁️ Cloudflare Edge<br/>(Zero Trust Tunnel)"]
+    GRAFANA["📊 Grafana Cloud<br/>(Free Plan)"]
 
     subgraph VCN["🌐 VCN 10.0.0.0/16"]
         subgraph SUB_API["Public Subnet — API (10.0.0.0/28)"]
@@ -19,7 +20,21 @@ graph TB
 
         subgraph SUB_WORKER["Public Subnet — Workers (10.0.1.0/24)"]
             WORKER["VM.Standard.A1.Flex<br/>(4 OCPU, 24 GB, ARM64)"]
-            CFD["cloudflared pod<br/>→ outbound to Cloudflare"]
+
+            subgraph NS_TUNNEL["namespace: tunnel"]
+                CFD["cloudflared<br/>(outbound connector)"]
+            end
+
+            subgraph NS_N8N["namespace: n8n (optional)"]
+                N8N["n8n Deployment<br/>(official Helm chart)<br/>ClusterIP :5678"]
+                NFS["nfs-server-provisioner<br/>(namespace: nfs-storage)"]
+                N8N --> NFS
+            end
+
+            subgraph NS_MON["namespace: monitoring (optional)"]
+                ALLOY["Grafana Alloy<br/>(DaemonSet)"]
+                KSM["kube-state-metrics"]
+            end
         end
 
         IGW["Internet Gateway ↔ Public Subnets"]
@@ -27,20 +42,42 @@ graph TB
     end
 
     CF -.->|"outbound<br/>connection"| CFD
+    CFD -->|"http://n8n-main.n8n<br/>.svc.cluster.local:5678"| N8N
+    ALLOY -->|"Prometheus remote_write<br/>Loki push"| GRAFANA
 
     classDef cf fill:#e65100,color:#fff,stroke:#ff6d00,stroke-width:2px
     classDef node_box fill:#1a237e,color:#fff,stroke:#5c6bc0,stroke-width:1px
     classDef gw fill:#37474f,color:#fff,stroke:#78909c,stroke-width:1px
+    classDef optional fill:#4a148c,color:#fff,stroke:#9c27b0,stroke-width:1px,stroke-dasharray:4 4
+    classDef grafana fill:#f57c00,color:#fff,stroke:#ff9800,stroke-width:2px
 
     class CF cf
     class API,LB,WORKER,CFD node_box
     class IGW,SGW gw
+    class N8N,NFS,ALLOY,KSM optional
+    class GRAFANA grafana
 
     style VCN fill:#263238,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5
     style SUB_API fill:#1565c0,color:#fff,stroke:#42a5f5,stroke-width:2px
     style SUB_LB fill:#1565c0,color:#fff,stroke:#42a5f5,stroke-width:2px
     style SUB_WORKER fill:#2e7d32,color:#fff,stroke:#66bb6a,stroke-width:2px
+    style NS_TUNNEL fill:#0d3349,color:#fff,stroke:#1976d2,stroke-width:1px
+    style NS_N8N fill:#1b0032,color:#fff,stroke:#7b1fa2,stroke-width:1px,stroke-dasharray:4 4
+    style NS_MON fill:#1b0032,color:#fff,stroke:#7b1fa2,stroke-width:1px,stroke-dasharray:4 4
 ```
+
+> Dashed borders indicate optional components controlled by feature flags (e.g., `enable_n8n`, `enable_grafana_monitoring`).
+
+## Modules
+
+| Module | Purpose |
+|---|---|
+| `modules/network` | VCN with 3 public subnets (API `10.0.0.0/28`, Workers `10.0.1.0/24`, LB `10.0.2.0/24`), Internet Gateway, Service Gateway, optional NAT Gateway |
+| `modules/oke` | `BASIC_CLUSTER` (Flannel CNI) with ARM node pool (`VM.Standard.A1.Flex`). ARM image auto-discovered at plan time by filtering OKE-optimized `aarch64` images matching the cluster's Kubernetes `major.minor` version |
+| `modules/budget` | Monthly OCI budget with absolute alert thresholds at $0.01, $1, $2, $3, $4, and $5 |
+| `modules/monitoring` | Grafana Alloy (DaemonSet) + kube-state-metrics deployed via Helm. Ships metrics (Prometheus remote_write) and logs (Loki push) to Grafana Cloud Free Plan |
+
+Helm releases for `metrics-server`, `nfs-server-provisioner`, `n8n`, and the `cloudflared` Deployment are declared directly in root `main.tf` (not inside a module).
 
 ## What's Always Free
 
@@ -114,6 +151,14 @@ kubectl get nodes
 | `enable_nat_gateway` | Enable NAT Gateway (costs $) | `bool` | `false` | no |
 | `enable_budget_alert` | Enable OCI Budget alert | `bool` | `true` | no |
 | `notification_email` | Email for budget alerts | `string` | `null` | no** |
+| `enable_cloudflare_tunnel` | Deploy shared Cloudflare Zero Trust Tunnel | `bool` | `false` | no |
+| `cloudflare_tunnel_namespace` | K8s namespace for Cloudflare Tunnel | `string` | `"tunnel"` | no |
+| `cloudflared_secret_name` | K8s Secret name containing `TUNNEL_TOKEN` | `string` | `"cloudflare-tunnel"` | no |
+| `enable_n8n` | Deploy n8n workflow automation | `bool` | `false` | no |
+| `n8n_namespace` | K8s namespace for n8n | `string` | `"n8n"` | no |
+| `n8n_pvc_size` | PVC size for n8n persistent data | `string` | `"5Gi"` | no |
+| `n8n_secret_name` | K8s Secret name containing n8n configuration | `string` | `"n8n-secrets"` | no |
+| `n8n_chart_version` | n8n Helm chart version (null = latest) | `string` | `null` | no |
 | `enable_grafana_monitoring` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
 | `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no*** |
 | `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no*** |
@@ -121,6 +166,8 @@ kubectl get nodes
 | `grafana_cloud_loki_username` | Grafana Cloud Loki instance ID | `string` | `null` | no*** |
 | `grafana_cloud_api_key` | Grafana Cloud API token (sensitive) | `string` | `null` | no*** |
 | `monitoring_namespace` | K8s namespace for monitoring | `string` | `"monitoring"` | no |
+| `alloy_chart_version` | Grafana Alloy Helm chart version (null = latest) | `string` | `null` | no |
+| `kube_state_metrics_chart_version` | kube-state-metrics Helm chart version (null = latest) | `string` | `null` | no |
 | `freeform_tags` | Tags for all resources | `map(string)` | `{"alwaysfree"="true"}` | no |
 
 *Either provide `tenancy_ocid` + `user_ocid` + `fingerprint` + `private_key_path` + `region`, or use `config_file_profile`.

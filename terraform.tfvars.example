@@ -57,6 +57,8 @@ notification_email    = "you@example.com"
 # grafana_cloud_loki_username           = "654321"
 # grafana_cloud_api_key                 = "glc_xxxxxxxxxxxxx"
 # monitoring_namespace                  = "monitoring"
+# alloy_chart_version                   = null  # null = latest; pin with e.g. "1.6.1"
+# kube_state_metrics_chart_version      = null  # null = latest; pin with e.g. "5.28.0"
 
 # Cloudflare Zero Trust Tunnel (shared ingress for all services)
 # Prerequisites:
@@ -68,10 +70,12 @@ notification_email    = "you@example.com"
 # cloudflare_tunnel_namespace   = "tunnel"
 # cloudflared_secret_name       = "cloudflare-tunnel"
 
-# n8n (workflow automation — requires enable_cloudflare_tunnel = true)
+# n8n (workflow automation — requires enable_nfs_storage = true AND enable_cloudflare_tunnel = true)
 # Prerequisites:
-#   1. Add Public Hostname in Cloudflare Dashboard: http://n8n-main.n8n.svc.cluster.local:5678
-#   2. Edit k8s/n8n-secrets.yaml with your values, then apply:
+#   1. enable_nfs_storage = true  (n8n uses the NFS StorageClass for persistent data)
+#   2. enable_cloudflare_tunnel = true  (Cloudflare Tunnel provides ingress — no OCI LB needed)
+#   3. Add Public Hostname in Cloudflare Dashboard: http://n8n-main.n8n.svc.cluster.local:5678
+#   4. Edit k8s/n8n-secrets.yaml with your values, then apply:
 #      kubectl apply -f k8s/namespace.yaml
 #      kubectl apply -f k8s/n8n-secrets.yaml
 # enable_n8n              = false
