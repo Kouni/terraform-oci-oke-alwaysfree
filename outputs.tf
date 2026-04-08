@@ -39,16 +39,15 @@ output "monitoring_namespace" {
 }
 
 output "n8n_setup_instructions" {
-  description = "Instructions to create required K8s secrets before enabling n8n"
+  description = "Required terraform.tfvars variables for enabling n8n and Cloudflare Tunnel"
   value       = <<-EOT
-    # Prerequisites — run BEFORE terraform apply:
+    # Set these variables in terraform.tfvars before enabling n8n:
     #
-    # 1. Cloudflare Tunnel (for enable_cloudflare_tunnel = true):
-    kubectl apply -f k8s/tunnel-namespace.yaml
-    kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
+    # enable_cloudflare_tunnel  = true
+    # cloudflare_tunnel_token   = "<token from Cloudflare Dashboard → Networks → Tunnels>"
     #
-    # 2. n8n (for enable_n8n = true):
-    kubectl apply -f k8s/namespace.yaml
-    kubectl apply -f k8s/n8n-secrets.yaml
+    # enable_n8n                = true
+    # n8n_host                  = "<your-n8n-hostname>"
+    # n8n_encryption_key        = "<32-char random string — keep this safe, never rotate>"
   EOT
 }
