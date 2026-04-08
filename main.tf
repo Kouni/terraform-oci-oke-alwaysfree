@@ -159,11 +159,22 @@ module "budget" {
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Kubernetes Namespaces
+# These are intentionally NOT gated on enable_n8n / enable_cloudflare_tunnel so
+# that disabling a feature never cascades into deleting the namespace (and with
+# it the PVC / persistent data inside).
 # ──────────────────────────────────────────────────────────────────────────────
 
-resource "kubernetes_namespace_v1" "n8n" {
-  count = var.enable_n8n ? 1 : 0
+moved {
+  from = kubernetes_namespace_v1.n8n[0]
+  to   = kubernetes_namespace_v1.n8n
+}
 
+moved {
+  from = kubernetes_namespace_v1.tunnel[0]
+  to   = kubernetes_namespace_v1.tunnel
+}
+
+resource "kubernetes_namespace_v1" "n8n" {
   metadata {
     name = var.n8n_namespace
     labels = {
@@ -175,8 +186,6 @@ resource "kubernetes_namespace_v1" "n8n" {
 }
 
 resource "kubernetes_namespace_v1" "tunnel" {
-  count = var.enable_cloudflare_tunnel ? 1 : 0
-
   metadata {
     name = var.cloudflare_tunnel_namespace
     labels = {
@@ -188,6 +197,42 @@ resource "kubernetes_namespace_v1" "tunnel" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Persistent Volume Claims
+# These are intentionally NOT gated on enable_n8n so that disabling the feature
+# never destroys stored data. The PVC outlives the Helm release; when n8n is
+# re-enabled it mounts the same claim and all workflows/credentials are intact.
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
+  metadata {
+    name      = "n8n-data"
+    namespace = kubernetes_namespace_v1.n8n.metadata[0].name
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+    }
+  }
+
+  spec {
+    access_modes       = ["ReadWriteOnce"]
+    storage_class_name = "nfs"
+    resources {
+      requests = {
+        storage = var.n8n_pvc_size
+      }
+    }
+  }
+
+  lifecycle {
+    # Prevent accidental data loss — must be manually removed from state before destroy
+    prevent_destroy = true
+    # PVC spec is immutable after binding; ignore any drift
+    ignore_changes = [spec]
+  }
+
+  depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Kubernetes Secrets
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -196,7 +241,7 @@ resource "kubernetes_secret_v1" "n8n_secrets" {
 
   metadata {
     name      = var.n8n_secret_name
-    namespace = kubernetes_namespace_v1.n8n[0].metadata[0].name
+    namespace = kubernetes_namespace_v1.n8n.metadata[0].name
   }
 
   data = {
@@ -223,7 +268,7 @@ resource "kubernetes_secret_v1" "cloudflare_tunnel" {
 
   metadata {
     name      = var.cloudflared_secret_name
-    namespace = kubernetes_namespace_v1.tunnel[0].metadata[0].name
+    namespace = kubernetes_namespace_v1.tunnel.metadata[0].name
   }
 
   data = {
@@ -264,12 +309,10 @@ resource "helm_release" "n8n" {
     database  = { type = "sqlite", useExternal = false }
     redis     = { enabled = false }
 
-    # Persistent storage (NFS)
+    # Persistent storage — uses Terraform-managed PVC so data survives helm uninstall
     persistence = {
-      enabled          = true
-      storageClassName = "nfs"
-      size             = var.n8n_pvc_size
-      accessModes      = ["ReadWriteOnce"]
+      enabled       = true
+      existingClaim = kubernetes_persistent_volume_claim_v1.n8n_data.metadata[0].name
     }
 
     # Use pre-created K8s Secret for n8n core settings
@@ -306,7 +349,7 @@ resource "helm_release" "n8n" {
     pdb = { enabled = false }
   })]
 
-  depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n, kubernetes_secret_v1.n8n_secrets]
+  depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n, kubernetes_secret_v1.n8n_secrets, kubernetes_persistent_volume_claim_v1.n8n_data]
 
   lifecycle {
     precondition {
