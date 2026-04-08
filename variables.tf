@@ -200,15 +200,35 @@ variable "n8n_pvc_size" {
 }
 
 variable "n8n_secret_name" {
-  description = "Name of the pre-created K8s Secret containing N8N_ENCRYPTION_KEY, N8N_HOST, N8N_PORT, N8N_PROTOCOL"
+  description = "Name of the K8s Secret (managed by Terraform) containing N8N_ENCRYPTION_KEY, N8N_HOST, N8N_PORT, N8N_PROTOCOL"
   type        = string
   default     = "n8n-secrets"
 }
 
+variable "n8n_encryption_key" {
+  description = "N8N_ENCRYPTION_KEY value. For new deployments: generate with `openssl rand -hex 32`. For existing clusters: extract with `kubectl get secret n8n-secrets -n n8n -o jsonpath='{.data.N8N_ENCRYPTION_KEY}' | base64 -d`. Changing this value destroys all stored n8n credentials"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "n8n_host" {
+  description = "Public hostname for n8n (e.g. n8n.example.com), injected as N8N_HOST into the n8n-secrets Secret"
+  type        = string
+  default     = null
+}
+
 variable "cloudflared_secret_name" {
-  description = "Name of the pre-created K8s Secret containing TUNNEL_TOKEN for Cloudflare Zero Trust Tunnel"
+  description = "Name of the K8s Secret (managed by Terraform) containing TUNNEL_TOKEN for Cloudflare Zero Trust Tunnel"
   type        = string
   default     = "cloudflare-tunnel"
+}
+
+variable "cloudflare_tunnel_token" {
+  description = "Cloudflare Zero Trust tunnel token (TUNNEL_TOKEN). Found in Cloudflare Dashboard → Networks → Tunnels → your tunnel → Configure"
+  type        = string
+  default     = null
+  sensitive   = true
 }
 
 variable "n8n_chart_version" {

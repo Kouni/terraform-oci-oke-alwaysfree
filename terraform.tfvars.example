@@ -66,23 +66,23 @@ notification_email    = "you@example.com"
 # Cloudflare Zero Trust Tunnel (shared ingress for all services)
 # Prerequisites:
 #   1. Create Tunnel: https://one.dash.cloudflare.com → Networks → Tunnels
-#   2. Edit k8s/cloudflare-tunnel-secret.yaml with your token, then apply:
-#      kubectl apply -f k8s/tunnel-namespace.yaml
-#      kubectl apply -f k8s/cloudflare-tunnel-secret.yaml
+#   2. Copy the tunnel token — it is used as cloudflare_tunnel_token below
 # enable_cloudflare_tunnel      = false
 # cloudflare_tunnel_namespace   = "tunnel"
 # cloudflared_secret_name       = "cloudflare-tunnel"
+# cloudflare_tunnel_token       = "eyJhIjoixx..."  # sensitive — do not commit
 
 # n8n (workflow automation — requires enable_nfs_storage = true AND enable_cloudflare_tunnel = true)
 # Prerequisites:
 #   1. enable_nfs_storage = true  (n8n uses the NFS StorageClass for persistent data)
 #   2. enable_cloudflare_tunnel = true  (Cloudflare Tunnel provides ingress — no OCI LB needed)
 #   3. Add Public Hostname in Cloudflare Dashboard: http://n8n-main.n8n.svc.cluster.local:5678
-#   4. Edit k8s/n8n-secrets.yaml with your values, then apply:
-#      kubectl apply -f k8s/namespace.yaml
-#      kubectl apply -f k8s/n8n-secrets.yaml
+#   4. For new deployments: generate key with `openssl rand -hex 32`
+#      For existing clusters: extract with `kubectl get secret n8n-secrets -n n8n -o jsonpath='{.data.N8N_ENCRYPTION_KEY}' | base64 -d`
 # enable_n8n              = false
 # n8n_namespace           = "n8n"
 # n8n_pvc_size            = "5Gi"
 # n8n_secret_name         = "n8n-secrets"
 # n8n_chart_version       = null  # null = latest; pin with e.g. "0.3.0"
+# n8n_host                = "n8n.example.com"
+# n8n_encryption_key      = "$(openssl rand -hex 32)"  # sensitive — do not commit
