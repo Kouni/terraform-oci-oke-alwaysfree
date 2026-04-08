@@ -27,6 +27,9 @@ compartment_ocid = "ocid1.tenancy.oc1..example"  # Use tenancy OCID for root com
 # enable_nfs_storage     = false
 # nfs_volume_size_in_gbs = 136
 
+# Cluster add-ons
+# enable_metrics_server = true  # Deploys metrics-server; required for kubectl top
+
 # SSH access to worker nodes (optional)
 # ssh_public_key = "ssh-rsa AAAA..."
 
