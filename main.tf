@@ -158,6 +158,87 @@ module "budget" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Kubernetes Namespaces
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "kubernetes_namespace_v1" "n8n" {
+  count = var.enable_n8n ? 1 : 0
+
+  metadata {
+    name = var.n8n_namespace
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+    }
+  }
+
+  depends_on = [module.oke]
+}
+
+resource "kubernetes_namespace_v1" "tunnel" {
+  count = var.enable_cloudflare_tunnel ? 1 : 0
+
+  metadata {
+    name = var.cloudflare_tunnel_namespace
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+    }
+  }
+
+  depends_on = [module.oke]
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Kubernetes Secrets
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "kubernetes_secret_v1" "n8n_secrets" {
+  count = var.enable_n8n ? 1 : 0
+
+  metadata {
+    name      = var.n8n_secret_name
+    namespace = kubernetes_namespace_v1.n8n[0].metadata[0].name
+  }
+
+  data = {
+    N8N_ENCRYPTION_KEY = var.n8n_encryption_key
+    N8N_HOST           = var.n8n_host
+    N8N_PORT           = "5678"
+    N8N_PROTOCOL       = "https"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.n8n_encryption_key != null
+      error_message = "n8n_encryption_key is required when enable_n8n is true. For existing clusters, extract the current key with: kubectl get secret n8n-secrets -n n8n -o jsonpath='{.data.N8N_ENCRYPTION_KEY}' | base64 -d"
+    }
+    precondition {
+      condition     = var.n8n_host != null
+      error_message = "n8n_host is required when enable_n8n is true (e.g. n8n.example.com)."
+    }
+  }
+}
+
+resource "kubernetes_secret_v1" "cloudflare_tunnel" {
+  count = var.enable_cloudflare_tunnel ? 1 : 0
+
+  metadata {
+    name      = var.cloudflared_secret_name
+    namespace = kubernetes_namespace_v1.tunnel[0].metadata[0].name
+  }
+
+  data = {
+    TUNNEL_TOKEN = var.cloudflare_tunnel_token
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.cloudflare_tunnel_token != null
+      error_message = "cloudflare_tunnel_token is required when enable_cloudflare_tunnel is true."
+    }
+  }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # n8n (workflow automation, Cloudflare Zero Trust Tunnel)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -169,7 +250,7 @@ resource "helm_release" "n8n" {
   chart            = "n8n"
   version          = var.n8n_chart_version
   namespace        = var.n8n_namespace
-  create_namespace = true
+  create_namespace = false
 
   values = [yamlencode({
     image = {
@@ -225,7 +306,7 @@ resource "helm_release" "n8n" {
     pdb = { enabled = false }
   })]
 
-  depends_on = [module.oke, helm_release.nfs_server_provisioner]
+  depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n, kubernetes_secret_v1.n8n_secrets]
 
   lifecycle {
     precondition {
@@ -359,5 +440,5 @@ resource "kubernetes_deployment_v1" "cloudflared" {
     }
   }
 
-  depends_on = [terraform_data.always_free_validation]
+  depends_on = [terraform_data.always_free_validation, kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
 }

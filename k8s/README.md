@@ -1,5 +1,18 @@
 # n8n on OKE Always Free — Cloudflare Zero Trust Tunnel 部署指南
 
+> **⚠️ 注意：YAML 手動部署已被 Terraform 取代**
+>
+> `namespace.yaml`、`tunnel-namespace.yaml`、`n8n-secrets.yaml`、`cloudflare-tunnel-secret.yaml`
+> 這四個 manifest 已由 Terraform 接管管理（`kubernetes_namespace_v1` + `kubernetes_secret_v1`）。
+> **請勿再手動 `kubectl apply` 這些檔案。**
+>
+> 設定方式改為在 `terraform.tfvars` 設定以下變數再執行 `terraform apply`：
+> - `cloudflare_tunnel_token`
+> - `n8n_encryption_key`
+> - `n8n_host`
+>
+> 詳見根目錄 `terraform.tfvars.example` 說明。
+
 在 OCI Always Free OKE 叢集上部署 [n8n](https://n8n.io) 工作流自動化平台，透過 Cloudflare Zero Trust Tunnel 安全存取，**不產生任何額外費用**。
 
 > **Helm Chart**: n8n 官方 — `oci://ghcr.io/n8n-io/n8n-helm-chart/n8n`
