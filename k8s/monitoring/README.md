@@ -292,7 +292,7 @@ kubectl port-forward svc/thanos-query 9090:9090 -n monitoring
 
 ### Step 6: Deploy Loki
 
-Loki provides self-hosted log storage. Alloy (deployed by Terraform) will dual-write logs to both Grafana Cloud and the local Loki instance once `enable_local_loki = true` is applied.
+Loki provides self-hosted log storage. Alloy is managed by Terraform, so enabling dual-write requires patching the Alloy ConfigMap via the provided script.
 
 **6a. Create Loki R2 credentials secret:**
 
@@ -325,15 +325,16 @@ helm upgrade --install loki grafana/loki \
   -f k8s/monitoring/loki-values.yaml
 ```
 
-**6d. Enable Alloy dual-write via Terraform:**
+**6d. Enable Alloy dual-write:**
 
-Once Loki is running, set `enable_local_loki = true` in `terraform.tfvars` and apply:
+Run the patch script to add `loki.write "local"` to the Alloy ConfigMap and restart the DaemonSet:
 
 ```bash
-terraform apply -target=module.monitoring
+chmod +x k8s/monitoring/alloy-enable-loki.sh
+./k8s/monitoring/alloy-enable-loki.sh
 ```
 
-Alloy will begin forwarding logs to both Grafana Cloud and `http://loki.monitoring.svc.cluster.local:3100`.
+The script is idempotent — safe to re-run. It patches the Alloy ConfigMap in-place (preserving the Terraform-managed base config) and adds `loki.write.local.receiver` to the `forward_to` arrays for pod logs and Kubernetes events.
 
 **6e. Verify Loki is receiving logs:**
 
