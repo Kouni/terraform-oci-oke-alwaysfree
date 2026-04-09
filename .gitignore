@@ -23,6 +23,9 @@ crash.*.log
 *.tfvars.json
 !terraform.tfvars.example
 
+# Kubernetes secrets (filled-in copies of *.example.yaml)
+secret-thanos-objstore.yaml
+
 # Private keys
 *.pem
 *.key

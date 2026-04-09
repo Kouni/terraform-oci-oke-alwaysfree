@@ -1,0 +1,94 @@
+# bitnami/thanos values — OCI Object Storage long-term storage
+#
+# Prerequisites:
+#   1. OCI Object Storage bucket created (any region matching the cluster)
+#   2. Customer Secret Key created in OCI Console
+#      Identity → Users → <your user> → Customer Secret Keys
+#   3. Secret applied to the cluster before this chart is installed:
+#      kubectl apply -f secret-thanos-objstore.yaml
+#
+# Deploy:
+#   helm repo add bitnami https://charts.bitnami.com/bitnami
+#   helm repo update
+#   helm upgrade --install thanos bitnami/thanos \
+#     --namespace monitoring \
+#     -f k8s/monitoring/thanos-values.yaml
+
+image:
+  registry: quay.io
+  repository: thanos/thanos
+  tag: "v0.34.1"
+
+# Reference the same Secret used by the Prometheus Thanos sidecar
+existingObjstoreSecret: thanos-objstore-secret
+
+# ──────────────── Query ────────────────
+# Unified query layer for Grafana. Merges live data from the Prometheus
+# Thanos sidecar gRPC endpoint with historical data from Store Gateway.
+
+query:
+  enabled: true
+  logLevel: info
+  stores:
+    # Thanos sidecar on the Prometheus StatefulSet pod (live TSDB, last 2h)
+    - prometheus-operated.monitoring.svc.cluster.local:10901
+    # Store Gateway (historical blocks in OCI Object Storage)
+    - thanos-storegateway.monitoring.svc.cluster.local:10901
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+# ──────────────── Store Gateway ────────────────
+# Serves historical TSDB blocks stored in OCI Object Storage.
+# Index header cache is ephemeral — regenerated from object storage on restart.
+
+storegateway:
+  enabled: true
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ──────────────── Compactor ────────────────
+# Runs as a singleton. Compacts and downsamples blocks in OCI Object Storage.
+# Working directory is ephemeral — no PVC needed.
+
+compactor:
+  enabled: true
+  persistence:
+    enabled: false
+  retentionResolutionRaw: 90d   # Keep raw 60s samples for 90 days
+  retentionResolution5m: 1y     # Keep 5m downsampled for 1 year
+  retentionResolution1h: 3y     # Keep 1h downsampled for 3 years
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 400m
+      memory: 512Mi
+
+# ──────────────── Disabled components ────────────────
+
+ruler:
+  enabled: false
+
+receive:
+  enabled: false
+
+queryFrontend:
+  enabled: false
+
+bucketweb:
+  enabled: false

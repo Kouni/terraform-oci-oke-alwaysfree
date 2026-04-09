@@ -51,27 +51,63 @@ grafana:
         cpu: 100m
         memory: 128Mi
 
+  # Additional datasource pointing at Thanos Query for long-term metric queries.
+  # The default Prometheus datasource (added by kube-prometheus-stack) covers the
+  # live 2d window; this datasource covers the full retention via Thanos.
+  additionalDataSources:
+    - name: Thanos
+      type: prometheus
+      url: http://thanos-query.monitoring.svc.cluster.local:9090
+      access: proxy
+      isDefault: false
+      jsonData:
+        timeInterval: "60s"
+
 # ──────────────── Prometheus ────────────────
 
 prometheus:
   prometheusSpec:
-    retention: 15d
-    retentionSize: "18GB"
+    # 2d local retention; Thanos sidecar uploads completed TSDB blocks to OCI
+    # Object Storage so historical data is queryable via Thanos Store Gateway.
+    retention: 2d
+    retentionSize: "15GB"
 
-    # Use volumes/volumeMounts instead of storageSpec.volumeClaimTemplate so that
-    # the PVC name is fully controlled (no Kubernetes-appended ordinal suffix).
-    # PVC `prometheus-data` is pre-created via pvc-prometheus.yaml and survives
-    # `helm uninstall` because it is not owned by the Helm release.
-    storageSpec: {}
+    # Required when Thanos sidecar is enabled: prevents Prometheus from compacting
+    # local blocks so Thanos Compactor can manage compaction in object storage.
+    disableCompaction: true
 
-    volumes:
-      - name: prometheus-db
-        persistentVolumeClaim:
-          claimName: prometheus-data
+    storageSpec:
+      volumeClaimTemplate:
+        metadata:
+          # Final PVC name: prometheus-data-prometheus-kube-prom-prometheus-0
+          # Created automatically by the StatefulSet on first helm install.
+          # Survives helm uninstall — Kubernetes never GCs StatefulSet PVCs.
+          name: prometheus-data
+        spec:
+          storageClassName: nfs
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
 
-    volumeMounts:
-      - name: prometheus-db
-        mountPath: /prometheus
+    # Thanos sidecar: shares the /prometheus volume with the Prometheus container,
+    # uploads completed 2h TSDB blocks to OCI Object Storage (S3-compatible API).
+    # Create the objstore secret before helm install:
+    #   kubectl apply -f secret-thanos-objstore.yaml
+    thanos:
+      image: quay.io/thanos/thanos:v0.34.1
+      objectStorageConfig:
+        existingSecret:
+          name: thanos-objstore-secret
+          key: objstore.yml
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
 
     resources:
       requests:
@@ -92,19 +128,20 @@ prometheus:
 
 alertmanager:
   alertmanagerSpec:
-    # Use volumes/volumeMounts instead of storage.volumeClaimTemplate so that
-    # the PVC name is fully controlled (no Kubernetes-appended ordinal suffix).
-    # PVC `alertmanager-data` is pre-created via pvc-alertmanager.yaml.
-    storage: {}
-
-    volumes:
-      - name: alertmanager-db
-        persistentVolumeClaim:
-          claimName: alertmanager-data
-
-    volumeMounts:
-      - name: alertmanager-db
-        mountPath: /alertmanager
+    storage:
+      volumeClaimTemplate:
+        metadata:
+          # Final PVC name: alertmanager-data-alertmanager-kube-prom-alertmanager-0
+          # Created automatically by the StatefulSet on first helm install.
+          # Survives helm uninstall — Kubernetes never GCs StatefulSet PVCs.
+          name: alertmanager-data
+        spec:
+          storageClassName: nfs
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 2Gi
 
     resources:
       requests:
