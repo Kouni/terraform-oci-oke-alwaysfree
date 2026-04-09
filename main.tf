@@ -373,35 +373,35 @@ resource "helm_release" "n8n" {
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "terraform_data" "grafana_monitoring_validation" {
-  count = var.enable_grafana_monitoring ? 1 : 0
+  count = var.enable_alloy_to_grafana_cloud ? 1 : 0
 
   lifecycle {
     precondition {
       condition     = var.grafana_cloud_prometheus_url != null
-      error_message = "grafana_cloud_prometheus_url is required when enable_grafana_monitoring is true."
+      error_message = "grafana_cloud_prometheus_url is required when enable_alloy_to_grafana_cloud is true."
     }
     precondition {
       condition     = var.grafana_cloud_prometheus_username != null
-      error_message = "grafana_cloud_prometheus_username is required when enable_grafana_monitoring is true."
+      error_message = "grafana_cloud_prometheus_username is required when enable_alloy_to_grafana_cloud is true."
     }
     precondition {
       condition     = var.grafana_cloud_loki_url != null
-      error_message = "grafana_cloud_loki_url is required when enable_grafana_monitoring is true."
+      error_message = "grafana_cloud_loki_url is required when enable_alloy_to_grafana_cloud is true."
     }
     precondition {
       condition     = var.grafana_cloud_loki_username != null
-      error_message = "grafana_cloud_loki_username is required when enable_grafana_monitoring is true."
+      error_message = "grafana_cloud_loki_username is required when enable_alloy_to_grafana_cloud is true."
     }
     precondition {
       condition     = var.grafana_cloud_api_key != null
-      error_message = "grafana_cloud_api_key is required when enable_grafana_monitoring is true."
+      error_message = "grafana_cloud_api_key is required when enable_alloy_to_grafana_cloud is true."
     }
   }
 }
 
 module "monitoring" {
   source = "./modules/monitoring"
-  count  = var.enable_grafana_monitoring ? 1 : 0
+  count  = var.enable_alloy_to_grafana_cloud ? 1 : 0
 
   grafana_cloud_prometheus_url      = var.grafana_cloud_prometheus_url
   grafana_cloud_prometheus_username = var.grafana_cloud_prometheus_username

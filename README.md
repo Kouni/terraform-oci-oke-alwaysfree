@@ -66,7 +66,7 @@ graph TB
     style NS_MON fill:#1b0032,color:#fff,stroke:#7b1fa2,stroke-width:1px,stroke-dasharray:4 4
 ```
 
-> Dashed borders indicate optional components controlled by feature flags (e.g., `enable_n8n`, `enable_grafana_monitoring`).
+> Dashed borders indicate optional components controlled by feature flags (e.g., `enable_n8n`, `enable_alloy_to_grafana_cloud`).
 
 ## Modules
 
@@ -162,7 +162,7 @@ kubectl get nodes
 | `n8n_chart_version` | n8n Helm chart version (null = latest) | `string` | `null` | no |
 | `n8n_encryption_key` | Encryption key for n8n credentials. Generate: `openssl rand -hex 32` | `string` | `null` | no**** |
 | `n8n_host` | Public hostname for n8n (e.g. `n8n.example.com`) | `string` | `null` | no**** |
-| `enable_grafana_monitoring` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
+| `enable_alloy_to_grafana_cloud` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
 | `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no*** |
 | `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no*** |
 | `grafana_cloud_loki_url` | Grafana Cloud Loki push endpoint | `string` | `null` | no*** |
@@ -177,7 +177,7 @@ kubectl get nodes
 
 **Required when `enable_budget_alert = true`.
 
-***Required when `enable_grafana_monitoring = true`.
+***Required when `enable_alloy_to_grafana_cloud = true`.
 
 ****Required when `enable_n8n = true`.
 
@@ -247,7 +247,7 @@ Ships cluster metrics and container logs to [Grafana Cloud Free Plan](https://gr
 #    - API token (MetricsPublisher role)
 
 # 2. Add to terraform.tfvars:
-#    enable_grafana_monitoring         = true
+#    enable_alloy_to_grafana_cloud     = true
 #    grafana_cloud_prometheus_url      = "https://prometheus-prod-xx-xxx.grafana.net/api/prom/push"
 #    grafana_cloud_prometheus_username = "123456"
 #    grafana_cloud_loki_url            = "https://logs-prod-xxx.grafana.net/loki/api/v1/push"

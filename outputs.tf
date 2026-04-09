@@ -35,7 +35,7 @@ output "n8n_namespace" {
 
 output "monitoring_namespace" {
   description = "Kubernetes namespace where monitoring components are deployed (null if monitoring is disabled)"
-  value       = var.enable_grafana_monitoring ? module.monitoring[0].namespace : null
+  value       = var.enable_alloy_to_grafana_cloud ? module.monitoring[0].namespace : null
 }
 
 output "n8n_setup_instructions" {

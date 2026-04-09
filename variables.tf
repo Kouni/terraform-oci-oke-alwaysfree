@@ -239,7 +239,7 @@ variable "n8n_chart_version" {
 
 # ──────────────── Grafana Cloud Monitoring ────────────────
 
-variable "enable_grafana_monitoring" {
+variable "enable_alloy_to_grafana_cloud" {
   description = "Deploy Grafana Alloy and kube-state-metrics to ship metrics and logs to Grafana Cloud Free Plan"
   type        = bool
   default     = false
