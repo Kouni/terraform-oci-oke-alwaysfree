@@ -90,11 +90,10 @@ resource "oci_core_route_table" "api_endpoint" {
     destination_type  = "CIDR_BLOCK"
   }
 
-  route_rules {
-    network_entity_id = oci_core_service_gateway.this.id
-    destination       = local.all_services_cidr
-    destination_type  = "SERVICE_CIDR_BLOCK"
-  }
+  # NOTE: OCI does not allow IGW and SGW (All Services) in the same route table.
+  # SGW routes are only valid in private subnets (no IGW). In this public-subnet
+  # design, OCI service traffic egresses via IGW. The SGW exists for future
+  # private-subnet migration; see the NAT Gateway comment above.
 
   freeform_tags = var.freeform_tags
 }
@@ -110,11 +109,10 @@ resource "oci_core_route_table" "worker" {
     destination_type  = "CIDR_BLOCK"
   }
 
-  route_rules {
-    network_entity_id = oci_core_service_gateway.this.id
-    destination       = local.all_services_cidr
-    destination_type  = "SERVICE_CIDR_BLOCK"
-  }
+  # NOTE: OCI does not allow IGW and SGW (All Services) in the same route table.
+  # SGW routes are only valid in private subnets (no IGW). In this public-subnet
+  # design, OCI service traffic egresses via IGW. The SGW exists for future
+  # private-subnet migration; see the NAT Gateway comment above.
 
   freeform_tags = var.freeform_tags
 }
