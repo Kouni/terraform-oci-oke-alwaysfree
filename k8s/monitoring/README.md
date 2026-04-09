@@ -17,9 +17,10 @@ Deploy a fully self-hosted monitoring stack — **kube-prometheus-stack** with *
   - [Step 3: Create Object Storage Secret](#step-3-create-object-storage-secret)
   - [Step 4: Install kube-prometheus-stack](#step-4-install-kube-prometheus-stack)
   - [Step 5: Deploy Thanos](#step-5-deploy-thanos)
-  - [Step 6: Configure Cloudflare Tunnel Public Hostname](#step-6-configure-cloudflare-tunnel-public-hostname)
-  - [Step 7: Verify Deployment](#step-7-verify-deployment)
-  - [Step 8: Set PV Reclaim Policy to Retain](#step-8-set-pv-reclaim-policy-to-retain)
+  - [Step 6: Deploy Loki](#step-6-deploy-loki)
+  - [Step 7: Configure Cloudflare Tunnel Public Hostname](#step-7-configure-cloudflare-tunnel-public-hostname)
+  - [Step 8: Verify Deployment](#step-8-verify-deployment)
+  - [Step 9: Set PV Reclaim Policy to Retain](#step-9-set-pv-reclaim-policy-to-retain)
 - [Upgrades and Reinstallation](#upgrades-and-reinstallation)
 - [Online PVC Expansion](#online-pvc-expansion)
 - [Resource and Storage Allocation](#resource-and-storage-allocation)
@@ -219,7 +220,35 @@ helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --create-namespace \
   -f k8s/monitoring/values.yaml \
-  --set grafana.adminPassword="<your-password>"
+  --set grafana.adminPassword="G$nq9&*!r35&"
+#  --set grafana.adminPassword="<your-password>"
+> Release "kube-prom" has been upgraded. Happy Helming!
+> NAME: kube-prom
+> LAST DEPLOYED: Fri Apr 10 02:26:36 2026
+> NAMESPACE: monitoring
+> STATUS: deployed
+> REVISION: 2
+> DESCRIPTION: Upgrade complete
+> TEST SUITE: None
+> NOTES:
+> kube-prometheus-stack has been installed. Check its status by running:
+>   kubectl --namespace monitoring get pods -l "release=kube-prom"
+> 
+> Get Grafana 'admin' user password by running:
+> 
+>   kubectl --namespace monitoring get secrets kube-prom-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+> 
+> Access Grafana local instance:
+> 
+>   export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=kube-prom" -oname)
+>   kubectl --namespace monitoring port-forward $POD_NAME 3000
+> 
+> Get your grafana admin user password by running:
+> 
+>   kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+> 
+> 
+> Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
 ```
 
 > **Tip**: Store the admin password in your password manager. Retrieve later with: `helm get values kube-prom -n monitoring`
@@ -261,7 +290,68 @@ kubectl port-forward svc/thanos-query 9090:9090 -n monitoring
 # Open http://localhost:9090/stores — both endpoints should show as Healthy
 ```
 
-### Step 6: Configure Cloudflare Tunnel Public Hostname
+### Step 6: Deploy Loki
+
+Loki provides self-hosted log storage. Alloy (deployed by Terraform) will dual-write logs to both Grafana Cloud and the local Loki instance once `enable_local_loki = true` is applied.
+
+**6a. Create Loki R2 credentials secret:**
+
+```bash
+cp k8s/monitoring/secret-loki-r2.example.yaml secret-loki-r2.yaml
+# Edit secret-loki-r2.yaml with your R2 access key ID and secret access key
+kubectl apply -f secret-loki-r2.yaml
+```
+
+> Obtain credentials: Cloudflare Dashboard → R2 → **Manage R2 API Tokens** → Create API Token (Object Read & Write on the Loki bucket).
+
+**6b. Update `loki-values.yaml` with your bucket and endpoint:**
+
+```yaml
+loki:
+  storage:
+    bucketNames:
+      chunks: <your-loki-r2-bucket>
+      ruler: <your-loki-r2-bucket>
+      admin: <your-loki-r2-bucket>
+    s3:
+      endpoint: <account-id>.r2.cloudflarestorage.com
+```
+
+**6c. Install Loki:**
+
+```bash
+helm upgrade --install loki grafana/loki \
+  --namespace monitoring \
+  -f k8s/monitoring/loki-values.yaml
+```
+
+**6d. Enable Alloy dual-write via Terraform:**
+
+Once Loki is running, set `enable_local_loki = true` in `terraform.tfvars` and apply:
+
+```bash
+terraform apply -target=module.monitoring
+```
+
+Alloy will begin forwarding logs to both Grafana Cloud and `http://loki.monitoring.svc.cluster.local:3100`.
+
+**6e. Verify Loki is receiving logs:**
+
+```bash
+kubectl get pods -n monitoring -l app.kubernetes.io/name=loki
+# Should show 1/1 Running
+
+kubectl logs -n monitoring -l app.kubernetes.io/name=loki --tail=20
+# Look for: "Starting Loki" and no S3 credential errors
+```
+
+In Grafana, navigate to **Explore → Loki datasource** and run:
+
+```logql
+{namespace="monitoring"} | line_format "{{.message}}"
+```
+
+### Step 7: Configure Cloudflare Tunnel Public Hostname
 
 1. Navigate to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com)
 2. Go to **Networks → Tunnels → your existing tunnel → Configure → Public Hostnames**
@@ -278,7 +368,7 @@ kubectl port-forward svc/thanos-query 9090:9090 -n monitoring
 
 > The `cloudflared` Pod is in the `tunnel` namespace — the full cluster-local FQDN is required for cross-namespace service resolution.
 
-### Step 7: Verify Deployment
+### Step 8: Verify Deployment
 
 ```bash
 # All pods should be Running
@@ -305,7 +395,7 @@ Verify metrics: **Explore → Select Prometheus datasource → Run `up`** — al
 > - **Prometheus** (default) — added automatically by kube-prometheus-stack, points directly at `kube-prom-prometheus:9090` for the live 2-day window
 > - **Thanos** — added via `additionalDataSources`, points at `thanos-query:9090` for the full retention period (2 days live + object storage history)
 
-### Step 8: Set PV Reclaim Policy to Retain
+### Step 9: Set PV Reclaim Policy to Retain
 
 The `nfs` StorageClass uses `reclaimPolicy: Delete` by default — a deleted PVC permanently destroys the backing PV. Patch to `Retain` immediately after all PVCs are bound.
 
@@ -460,9 +550,10 @@ kubectl patch pvc alertmanager-data-alertmanager-kube-prom-alertmanager-0 \
 | Thanos Query | 100m | 300m | 128Mi | 256Mi |
 | Thanos Store Gateway | 100m | 200m | 128Mi | 256Mi |
 | Thanos Compactor | 100m | 400m | 128Mi | 512Mi |
-| **Total** | **945m** | **2550m** | **1.4Gi** | **3.0Gi** |
+| Loki | 100m | 500m | 256Mi | 512Mi |
+| **Total** | **1045m** | **3050m** | **1.656Gi** | **3.5Gi** |
 
-Always Free node capacity: **4 OCPU (4000m)**, **24 GB RAM** — the monitoring stack consumes ≈24% CPU and ≈5.8% RAM at peak requests.
+Always Free node capacity: **4 OCPU (4000m)**, **24 GB RAM** — the monitoring stack consumes ≈26% CPU and ≈6.9% RAM at peak requests.
 
 ### NFS Storage Allocation
 
@@ -471,8 +562,9 @@ Always Free node capacity: **4 OCPU (4000m)**, **24 GB RAM** — the monitoring 
 | `prometheus-data-prometheus-kube-prom-prometheus-0` | 20 Gi | Prometheus metrics (2d local retention; historical in OCI Object Storage) |
 | `alertmanager-data-alertmanager-kube-prom-alertmanager-0` | 2 Gi | Alertmanager state |
 | `grafana-data` | 5 Gi | Dashboards, datasource configs |
+| `storage-loki-0` | 10 Gi | Loki WAL and local ingester buffer |
 | `n8n-data` (existing) | 5 Gi | n8n workflows and SQLite DB |
-| **Total** | **32 Gi** | out of 136 Gi NFS backing volume |
+| **Total** | **42 Gi** | out of 136 Gi NFS backing volume |
 
 > Thanos Store Gateway and Compactor use `emptyDir` (no NFS PVC) — index headers are rebuilt from OCI Object Storage on restart, and the compactor uses local disk only as a transient working directory.
 
@@ -532,6 +624,8 @@ Remove the `grafana.your-domain.com` public hostname from Cloudflare Dashboard w
 
 ```bash
 helm uninstall kube-prom -n monitoring
+helm uninstall thanos -n monitoring
+helm uninstall loki -n monitoring
 ```
 
 All PVCs are retained. Reinstall at any time to recover all data.
@@ -542,16 +636,18 @@ All PVCs are retained. Reinstall at any time to recover all data.
 # 1. Uninstall Helm releases
 helm uninstall kube-prom -n monitoring
 helm uninstall thanos -n monitoring
+helm uninstall loki -n monitoring
 
-# 2. Delete the objstore secret
-kubectl delete secret thanos-objstore-secret -n monitoring
+# 2. Delete secrets
+kubectl delete secret thanos-objstore-secret loki-r2-secret -n monitoring
 
 # 3. Delete the Grafana PVC (data will be permanently lost)
 kubectl delete pvc grafana-data -n monitoring
 
-# 4. Delete Prometheus and Alertmanager PVCs (data will be permanently lost)
+# 4. Delete Prometheus, Alertmanager, and Loki PVCs (data will be permanently lost)
 kubectl delete pvc prometheus-data-prometheus-kube-prom-prometheus-0 -n monitoring
 kubectl delete pvc alertmanager-data-alertmanager-kube-prom-alertmanager-0 -n monitoring
+kubectl delete pvc storage-loki-0 -n monitoring
 
 # 5. Delete the namespace
 kubectl delete namespace monitoring
