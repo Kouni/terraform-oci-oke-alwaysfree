@@ -92,7 +92,9 @@ provider "helm" {
     host                   = module.oke.cluster_endpoint
     cluster_ca_certificate = local.cluster_ca_certificate
     exec = {
-      api_version = "client.authentication.k8s.io/v1"
+      # OCI CLI currently returns v1beta1 ExecCredential regardless of requested version.
+      # Track: https://github.com/oracle/oci-cli/issues — update to v1 once OCI CLI supports it.
+      api_version = "client.authentication.k8s.io/v1beta1"
       command     = "oci"
       args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
     }
@@ -103,7 +105,9 @@ provider "kubernetes" {
   host                   = module.oke.cluster_endpoint
   cluster_ca_certificate = local.cluster_ca_certificate
   exec {
-    api_version = "client.authentication.k8s.io/v1"
+    # OCI CLI currently returns v1beta1 ExecCredential regardless of requested version.
+    # Track: https://github.com/oracle/oci-cli/issues — update to v1 once OCI CLI supports it.
+    api_version = "client.authentication.k8s.io/v1beta1"
     command     = "oci"
     args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
   }
