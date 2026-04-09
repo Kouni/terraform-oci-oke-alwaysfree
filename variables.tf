@@ -123,7 +123,7 @@ variable "vcn_cidr" {
 }
 
 variable "enable_nat_gateway" {
-  description = "Enable NAT Gateway for private subnet outbound access. WARNING: NAT Gateway is NOT Always Free and will incur charges"
+  description = "Create a NAT Gateway (placeholder for future private-subnet migration). WARNING: NAT Gateway is NOT Always Free and will incur charges. Currently no route table references it because all subnets are public"
   type        = bool
   default     = false
 }
@@ -197,6 +197,11 @@ variable "n8n_pvc_size" {
   description = "PVC size for n8n persistent data (SQLite DB, credentials, workflows). Allocated from NFS StorageClass"
   type        = string
   default     = "5Gi"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*Gi$", var.n8n_pvc_size))
+    error_message = "n8n_pvc_size must be a valid Kubernetes quantity in whole gibibytes (e.g. '5Gi', '10Gi')."
+  }
 }
 
 variable "n8n_secret_name" {
@@ -235,6 +240,18 @@ variable "n8n_chart_version" {
   description = "n8n Helm chart version. If null, uses the latest available version"
   type        = string
   default     = null
+}
+
+variable "n8n_image_tag" {
+  description = "n8n container image tag (e.g. '1.94.1'). Defaults to 'latest' — pin a specific version for reproducible deployments"
+  type        = string
+  default     = "latest"
+}
+
+variable "cloudflared_image_tag" {
+  description = "cloudflared container image tag (e.g. '2025.4.1'). Defaults to 'latest' — pin a specific version for reproducible deployments"
+  type        = string
+  default     = "latest"
 }
 
 # ──────────────── Grafana Cloud Monitoring ────────────────

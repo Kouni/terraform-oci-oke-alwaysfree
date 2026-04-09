@@ -70,6 +70,7 @@ notification_email    = "you@example.com"
 # enable_cloudflare_tunnel      = false
 # cloudflare_tunnel_namespace   = "tunnel"
 # cloudflared_secret_name       = "cloudflare-tunnel"
+# cloudflared_image_tag         = "latest"  # pin with e.g. "2025.4.1" for reproducible deployments
 # cloudflare_tunnel_token       = "eyJhIjoixx..."  # sensitive — do not commit
 
 # n8n (workflow automation — requires enable_nfs_storage = true AND enable_cloudflare_tunnel = true)
@@ -84,5 +85,6 @@ notification_email    = "you@example.com"
 # n8n_pvc_size            = "5Gi"
 # n8n_secret_name         = "n8n-secrets"
 # n8n_chart_version       = null  # null = latest; pin with e.g. "0.3.0"
+# n8n_image_tag           = "latest"  # pin with e.g. "1.94.1" for reproducible deployments
 # n8n_host                = "n8n.example.com"
-# n8n_encryption_key      = "$(openssl rand -hex 32)"  # sensitive — do not commit
+# n8n_encryption_key      = "replace-with-openssl-rand-hex-32-output"  # sensitive — do not commit

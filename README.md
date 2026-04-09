@@ -98,6 +98,9 @@ The following resources are **NOT** Always Free and will incur charges:
 - **Non-ARM shapes**: Hardcoded to `VM.Standard.A1.Flex`
 - **Exceeding ARM limits**: Validation rules prevent exceeding 4 OCPUs / 24 GB RAM / 200 GB block storage (boot + NFS)
 
+> [!CAUTION]
+> **Sensitive values in Terraform state** — `terraform.tfstate` contains secrets such as `n8n_encryption_key` and `cloudflare_tunnel_token` in plaintext. **Never commit state files to version control.** For production use, configure a [remote backend](https://developer.hashicorp.com/terraform/language/backend) with encryption at rest (e.g., OCI Object Storage with SSE).
+
 ## Prerequisites
 
 - [Terraform](https://www.terraform.io/downloads) >= 1.5.0
@@ -130,12 +133,12 @@ kubectl get nodes
 
 | Name | Description | Type | Default | Required |
 |---|---|---|---|---|
-| `tenancy_ocid` | The OCID of the tenancy | `string` | `null` | no* |
-| `region` | The OCI region | `string` | `null` | no* |
-| `user_ocid` | The OCID of the user | `string` | `null` | no* |
-| `fingerprint` | API key fingerprint | `string` | `null` | no* |
-| `private_key_path` | Path to API private key | `string` | `null` | no* |
-| `config_file_profile` | OCI CLI config profile | `string` | `null` | no* |
+| `tenancy_ocid` | The OCID of the tenancy | `string` | `null` | no¹ |
+| `region` | The OCI region | `string` | `null` | no¹ |
+| `user_ocid` | The OCID of the user | `string` | `null` | no¹ |
+| `fingerprint` | API key fingerprint | `string` | `null` | no¹ |
+| `private_key_path` | Path to API private key | `string` | `null` | no¹ |
+| `config_file_profile` | OCI CLI config profile | `string` | `null` | no¹ |
 | `compartment_ocid` | Compartment OCID | `string` | - | yes |
 | `cluster_name` | OKE cluster name | `string` | `"alwaysfree-oke"` | no |
 | `kubernetes_version` | K8s version | `string` | `null` (latest) | no |
@@ -150,38 +153,40 @@ kubectl get nodes
 | `vcn_cidr` | VCN CIDR block | `string` | `"10.0.0.0/16"` | no |
 | `enable_nat_gateway` | Enable NAT Gateway (costs $) | `bool` | `false` | no |
 | `enable_budget_alert` | Enable OCI Budget alert | `bool` | `true` | no |
-| `notification_email` | Email for budget alerts | `string` | `null` | no** |
+| `notification_email` | Email for budget alerts | `string` | `null` | no² |
 | `enable_cloudflare_tunnel` | Deploy shared Cloudflare Zero Trust Tunnel | `bool` | `false` | no |
 | `cloudflare_tunnel_namespace` | K8s namespace for Cloudflare Tunnel | `string` | `"tunnel"` | no |
 | `cloudflared_secret_name` | K8s Secret name containing `TUNNEL_TOKEN` | `string` | `"cloudflare-tunnel"` | no |
-| `cloudflare_tunnel_token` | Cloudflare Zero Trust tunnel token | `string` | `null` | no***** |
+| `cloudflared_image_tag` | cloudflared container image tag | `string` | `"latest"` | no |
+| `cloudflare_tunnel_token` | Cloudflare Zero Trust tunnel token | `string` | `null` | no⁵ |
 | `enable_n8n` | Deploy n8n workflow automation | `bool` | `false` | no |
 | `n8n_namespace` | K8s namespace for n8n | `string` | `"n8n"` | no |
 | `n8n_pvc_size` | PVC size for n8n persistent data | `string` | `"5Gi"` | no |
 | `n8n_secret_name` | K8s Secret name containing n8n configuration | `string` | `"n8n-secrets"` | no |
 | `n8n_chart_version` | n8n Helm chart version (null = latest) | `string` | `null` | no |
-| `n8n_encryption_key` | Encryption key for n8n credentials. Generate: `openssl rand -hex 32` | `string` | `null` | no**** |
-| `n8n_host` | Public hostname for n8n (e.g. `n8n.example.com`) | `string` | `null` | no**** |
+| `n8n_image_tag` | n8n container image tag | `string` | `"latest"` | no |
+| `n8n_encryption_key` | Encryption key for n8n credentials. Generate: `openssl rand -hex 32` | `string` | `null` | no⁴ |
+| `n8n_host` | Public hostname for n8n (e.g. `n8n.example.com`) | `string` | `null` | no⁴ |
 | `enable_alloy_to_grafana_cloud` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
-| `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no*** |
-| `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no*** |
-| `grafana_cloud_loki_url` | Grafana Cloud Loki push endpoint | `string` | `null` | no*** |
-| `grafana_cloud_loki_username` | Grafana Cloud Loki instance ID | `string` | `null` | no*** |
-| `grafana_cloud_api_key` | Grafana Cloud API token (sensitive) | `string` | `null` | no*** |
+| `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no³ |
+| `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no³ |
+| `grafana_cloud_loki_url` | Grafana Cloud Loki push endpoint | `string` | `null` | no³ |
+| `grafana_cloud_loki_username` | Grafana Cloud Loki instance ID | `string` | `null` | no³ |
+| `grafana_cloud_api_key` | Grafana Cloud API token (sensitive) | `string` | `null` | no³ |
 | `monitoring_namespace` | K8s namespace for monitoring | `string` | `"monitoring"` | no |
 | `alloy_chart_version` | Grafana Alloy Helm chart version (null = latest) | `string` | `null` | no |
 | `kube_state_metrics_chart_version` | kube-state-metrics Helm chart version (null = latest) | `string` | `null` | no |
 | `freeform_tags` | Tags for all resources | `map(string)` | `{"alwaysfree"="true"}` | no |
 
-*Either provide `tenancy_ocid` + `user_ocid` + `fingerprint` + `private_key_path` + `region`, or use `config_file_profile`.
+¹ Either provide `tenancy_ocid` + `user_ocid` + `fingerprint` + `private_key_path` + `region`, or use `config_file_profile` — not both.
 
-**Required when `enable_budget_alert = true`.
+² Required when `enable_budget_alert = true`.
 
-***Required when `enable_alloy_to_grafana_cloud = true`.
+³ Required when `enable_alloy_to_grafana_cloud = true`.
 
-****Required when `enable_n8n = true`.
+⁴ Required when `enable_n8n = true`.
 
-*****Required when `enable_cloudflare_tunnel = true`.
+⁵ Required when `enable_cloudflare_tunnel = true`.
 
 ## Outputs
 

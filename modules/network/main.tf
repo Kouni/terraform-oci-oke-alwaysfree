@@ -52,8 +52,19 @@ resource "oci_core_service_gateway" "this" {
   }
 
   freeform_tags = var.freeform_tags
+
+  lifecycle {
+    precondition {
+      condition     = length(data.oci_core_services.all.services) > 0
+      error_message = "No OCI services found matching 'All * Services In Oracle Services Network'. Verify the OCI region supports Service Gateway."
+    }
+  }
 }
 
+# Placeholder for future private-subnet migration. Currently no route table
+# references this gateway because all subnets are public. When converting
+# the worker subnet to private, add a route rule pointing 0.0.0.0/0 to
+# this NAT Gateway and remove the IGW rule from the worker route table.
 resource "oci_core_nat_gateway" "this" {
   count = var.enable_nat_gateway ? 1 : 0
 
@@ -79,6 +90,12 @@ resource "oci_core_route_table" "api_endpoint" {
     destination_type  = "CIDR_BLOCK"
   }
 
+  route_rules {
+    network_entity_id = oci_core_service_gateway.this.id
+    destination       = local.all_services_cidr
+    destination_type  = "SERVICE_CIDR_BLOCK"
+  }
+
   freeform_tags = var.freeform_tags
 }
 
@@ -91,6 +108,12 @@ resource "oci_core_route_table" "worker" {
     network_entity_id = oci_core_internet_gateway.this.id
     destination       = "0.0.0.0/0"
     destination_type  = "CIDR_BLOCK"
+  }
+
+  route_rules {
+    network_entity_id = oci_core_service_gateway.this.id
+    destination       = local.all_services_cidr
+    destination_type  = "SERVICE_CIDR_BLOCK"
   }
 
   freeform_tags = var.freeform_tags

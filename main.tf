@@ -34,6 +34,13 @@ resource "terraform_data" "always_free_validation" {
       condition     = !var.enable_budget_alert || var.notification_email != null
       error_message = "notification_email is required when enable_budget_alert is true."
     }
+    precondition {
+      condition = (
+        (var.config_file_profile != null && var.tenancy_ocid == null && var.user_ocid == null && var.fingerprint == null && var.private_key_path == null) ||
+        (var.config_file_profile == null && var.tenancy_ocid != null && var.user_ocid != null && var.fingerprint != null && var.private_key_path != null && var.region != null)
+      )
+      error_message = "Specify either config_file_profile (recommended) OR all of tenancy_ocid, user_ocid, fingerprint, private_key_path, and region — not both."
+    }
   }
 }
 
@@ -85,7 +92,7 @@ provider "helm" {
     host                   = module.oke.cluster_endpoint
     cluster_ca_certificate = local.cluster_ca_certificate
     exec = {
-      api_version = "client.authentication.k8s.io/v1beta1"
+      api_version = "client.authentication.k8s.io/v1"
       command     = "oci"
       args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
     }
@@ -96,7 +103,7 @@ provider "kubernetes" {
   host                   = module.oke.cluster_endpoint
   cluster_ca_certificate = local.cluster_ca_certificate
   exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
+    api_version = "client.authentication.k8s.io/v1"
     command     = "oci"
     args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
   }
@@ -305,8 +312,8 @@ resource "helm_release" "n8n" {
   values = [yamlencode({
     image = {
       repository = "docker.n8n.io/n8nio/n8n"
-      tag        = "latest"
-      pullPolicy = "Always"
+      tag        = var.n8n_image_tag
+      pullPolicy = var.n8n_image_tag == "latest" ? "Always" : "IfNotPresent"
     }
 
     # Standalone mode: SQLite, no external PostgreSQL/Redis
@@ -451,7 +458,7 @@ resource "kubernetes_deployment_v1" "cloudflared" {
       spec {
         container {
           name  = "cloudflared"
-          image = "docker.io/cloudflare/cloudflared:latest"
+          image = "docker.io/cloudflare/cloudflared:${var.cloudflared_image_tag}"
           args  = ["tunnel", "--no-autoupdate", "run"]
 
           env {

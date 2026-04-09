@@ -5,7 +5,7 @@ resource "oci_budget_budget" "this" {
   target_type    = "COMPARTMENT"
   targets        = [var.compartment_ocid]
   display_name   = "alwaysfree-budget"
-  description    = "Always Free safety net &mdash; alerts when any actual spend is detected"
+  description    = "Always Free safety net — alerts when any actual spend is detected"
   freeform_tags  = var.freeform_tags
 }
 

@@ -15,7 +15,7 @@ variable "vcn_cidr" {
 }
 
 variable "enable_nat_gateway" {
-  description = "Enable NAT Gateway. WARNING: NAT Gateway is NOT Always Free and will incur charges"
+  description = "Create a NAT Gateway (placeholder for future private-subnet migration). WARNING: NAT Gateway is NOT Always Free and will incur charges. Currently no route table references it because all subnets are public"
   type        = bool
   default     = false
 }
