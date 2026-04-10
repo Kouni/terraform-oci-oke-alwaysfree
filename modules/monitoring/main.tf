@@ -23,36 +23,6 @@ resource "kubernetes_secret_v1" "grafana_cloud" {
   }
 }
 
-# ──────────────── kube-state-metrics ────────────────
-
-resource "helm_release" "kube_state_metrics" {
-  name       = "kube-state-metrics"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  chart      = "kube-state-metrics"
-  version    = var.kube_state_metrics_chart_version
-  namespace  = kubernetes_namespace_v1.this.metadata[0].name
-
-  values = [yamlencode({
-    resources = {
-      requests = { cpu = "10m", memory = "32Mi" }
-      limits   = { cpu = "100m", memory = "64Mi" }
-    }
-
-    # Collect only essential resource types to reduce memory usage
-    collectors = [
-      "daemonsets",
-      "deployments",
-      "namespaces",
-      "nodes",
-      "persistentvolumeclaims",
-      "pods",
-      "replicasets",
-      "services",
-      "statefulsets",
-    ]
-  })]
-}
-
 # ──────────────── Grafana Alloy ────────────────
 
 resource "helm_release" "alloy" {
@@ -108,5 +78,5 @@ resource "helm_release" "alloy" {
     }
   })]
 
-  depends_on = [helm_release.kube_state_metrics]
+  depends_on = [kubernetes_secret_v1.grafana_cloud]
 }

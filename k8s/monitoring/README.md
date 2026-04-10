@@ -64,7 +64,7 @@ graph TB
 
                 OP["Deployment: prometheus-operator"]
                 NE["DaemonSet: node-exporter"]
-                KSM["Deployment: kube-state-metrics"]
+                KSM["Deployment: obs-kube-state-metrics"]
             end
 
             subgraph NS_NFS["🟣 Namespace: nfs-storage"]
@@ -547,7 +547,7 @@ kubectl patch pvc alertmanager-data-alertmanager-obs-alertmanager-0 \
 | prometheus-operator | 100m | 200m | 128Mi | 256Mi |
 | admission webhook | 25m | 50m | 32Mi | 64Mi |
 | node-exporter | 100m | 200m | 30Mi | 64Mi |
-| kube-state-metrics | 10m | 100m | 32Mi | 64Mi |
+| kube-state-metrics (obs subchart) | 10m | 100m | 32Mi | 64Mi |
 | Thanos Query | 100m | 300m | 128Mi | 256Mi |
 | Thanos Store Gateway | 100m | 200m | 128Mi | 256Mi |
 | Thanos Compactor | 100m | 400m | 128Mi | 512Mi |
