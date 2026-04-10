@@ -196,15 +196,10 @@ prometheus-node-exporter:
       memory: 64Mi
 
 # ──────────────── kube-state-metrics ────────────────
+# Disabled: already deployed as a standalone Helm release by Terraform (modules/monitoring).
 
 kube-state-metrics:
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 100m
-      memory: 64Mi
+  enabled: false
 
 # ──────────────── OKE Managed Control Plane ────────────────
 # OKE manages the control plane — the API server, controller-manager, scheduler,
