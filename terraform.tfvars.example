@@ -61,7 +61,6 @@ notification_email    = "you@example.com"
 # grafana_cloud_api_key                 = "glc_xxxxxxxxxxxxx"
 # monitoring_namespace                  = "monitoring"
 # alloy_chart_version                   = null  # null = latest; pin with e.g. "1.6.1"
-# kube_state_metrics_chart_version      = null  # null = latest; pin with e.g. "5.28.0"
 
 # Cloudflare Zero Trust Tunnel (shared ingress for all services)
 # Prerequisites:

@@ -196,10 +196,32 @@ prometheus-node-exporter:
       memory: 64Mi
 
 # ──────────────── kube-state-metrics ────────────────
-# Disabled: already deployed as a standalone Helm release by Terraform (modules/monitoring).
+# Managed by obs (kube-prometheus-stack) subchart — includes a ServiceMonitor so
+# Prometheus auto-scrapes KSM metrics for local Grafana dashboards.
+# Resource limits and collectors mirror the previous standalone Terraform config.
 
 kube-state-metrics:
-  enabled: false
+  enabled: true
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+  # Collect only essential resource types to reduce memory usage
+  collectors:
+    - daemonsets
+    - deployments
+    - namespaces
+    - nodes
+    - persistentvolumeclaims
+    - pods
+    - replicasets
+    - services
+    - statefulsets
 
 # ──────────────── OKE Managed Control Plane ────────────────
 # OKE manages the control plane — the API server, controller-manager, scheduler,

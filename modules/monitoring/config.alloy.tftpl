@@ -142,7 +142,7 @@ prometheus.relabel "cadvisor" {
 
 prometheus.scrape "kube_state_metrics" {
   targets = [{
-    __address__ = "kube-state-metrics.${namespace}.svc.cluster.local:8080",
+    __address__ = "obs-kube-state-metrics.${namespace}.svc.cluster.local:8080",
   }]
 
   scrape_interval = "60s"

@@ -33,7 +33,6 @@ graph TB
 
             subgraph NS_MON["namespace: monitoring (optional)"]
                 ALLOY["Grafana Alloy<br/>(DaemonSet)"]
-                KSM["kube-state-metrics"]
             end
         end
 
@@ -54,7 +53,7 @@ graph TB
     class CF cf
     class API,LB,WORKER,CFD node_box
     class IGW,SGW gw
-    class N8N,NFS,ALLOY,KSM optional
+    class N8N,NFS,ALLOY optional
     class GRAFANA grafana
 
     style VCN fill:#263238,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5
@@ -75,7 +74,7 @@ graph TB
 | `modules/network` | VCN with 3 public subnets (API `10.0.0.0/28`, Workers `10.0.1.0/24`, LB `10.0.2.0/24`), Internet Gateway, Service Gateway, optional NAT Gateway |
 | `modules/oke` | `BASIC_CLUSTER` (Flannel CNI) with ARM node pool (`VM.Standard.A1.Flex`). ARM image auto-discovered at plan time by filtering OKE-optimized `aarch64` images matching the cluster's Kubernetes `major.minor` version |
 | `modules/budget` | Monthly OCI budget with absolute alert thresholds at $0.01, $1, $2, $3, $4, and $5 |
-| `modules/monitoring` | Grafana Alloy (DaemonSet) + kube-state-metrics deployed via Helm. Ships metrics (Prometheus remote_write) and logs (Loki push) to Grafana Cloud Free Plan |
+| `modules/monitoring` | Grafana Alloy (DaemonSet) deployed via Helm. Ships metrics (Prometheus remote_write) and logs (Loki push) to Grafana Cloud Free Plan. kube-state-metrics is managed by the obs (kube-prometheus-stack) subchart in `k8s/monitoring/` |
 
 Helm releases for `metrics-server`, `nfs-server-provisioner`, `n8n`, and the `cloudflared` Deployment are declared directly in root `main.tf` (not inside a module).
 
@@ -167,7 +166,7 @@ kubectl get nodes
 | `n8n_image_tag` | n8n container image tag | `string` | `"latest"` | no |
 | `n8n_encryption_key` | Encryption key for n8n credentials. Generate: `openssl rand -hex 32` | `string` | `null` | no⁴ |
 | `n8n_host` | Public hostname for n8n (e.g. `n8n.example.com`) | `string` | `null` | no⁴ |
-| `enable_alloy_to_grafana_cloud` | Deploy Grafana Alloy + kube-state-metrics to Grafana Cloud | `bool` | `false` | no |
+| `enable_alloy_to_grafana_cloud` | Deploy Grafana Alloy to ship metrics/logs to Grafana Cloud | `bool` | `false` | no |
 | `grafana_cloud_prometheus_url` | Grafana Cloud Prometheus remote write endpoint | `string` | `null` | no³ |
 | `grafana_cloud_prometheus_username` | Grafana Cloud Prometheus instance ID | `string` | `null` | no³ |
 | `grafana_cloud_loki_url` | Grafana Cloud Loki push endpoint | `string` | `null` | no³ |
@@ -175,7 +174,6 @@ kubectl get nodes
 | `grafana_cloud_api_key` | Grafana Cloud API token (sensitive) | `string` | `null` | no³ |
 | `monitoring_namespace` | K8s namespace for monitoring | `string` | `"monitoring"` | no |
 | `alloy_chart_version` | Grafana Alloy Helm chart version (null = latest) | `string` | `null` | no |
-| `kube_state_metrics_chart_version` | kube-state-metrics Helm chart version (null = latest) | `string` | `null` | no |
 | `freeform_tags` | Tags for all resources | `map(string)` | `{"alwaysfree"="true"}` | no |
 
 ¹ Either provide `tenancy_ocid` + `user_ocid` + `fingerprint` + `private_key_path` + `region`, or use `config_file_profile` — not both.
@@ -225,7 +223,7 @@ This approach eliminates the need for inbound ports, providing security through 
 
 ## Grafana Cloud Monitoring
 
-Ships cluster metrics and container logs to [Grafana Cloud Free Plan](https://grafana.com/products/cloud/) using **Grafana Alloy** (unified collector) and **kube-state-metrics**.
+Ships cluster metrics and container logs to [Grafana Cloud Free Plan](https://grafana.com/products/cloud/) using **Grafana Alloy** (unified collector). Alloy scrapes **kube-state-metrics** (managed by the obs kube-prometheus-stack subchart) and kubelet/cAdvisor endpoints.
 
 ### What Gets Monitored
 
@@ -233,7 +231,7 @@ Ships cluster metrics and container logs to [Grafana Cloud Free Plan](https://gr
 |------|------|--------|
 | Metrics | Container CPU, memory, network, filesystem | kubelet cAdvisor |
 | Metrics | Node capacity, allocatable resources | kubelet |
-| Metrics | Pod status, restarts, deployment replicas | kube-state-metrics |
+| Metrics | Pod status, restarts, deployment replicas | kube-state-metrics (obs subchart) |
 | Logs | All container stdout/stderr | Kubernetes API |
 | Logs | Kubernetes events (warnings, errors) | Kubernetes API |
 

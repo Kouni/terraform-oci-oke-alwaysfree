@@ -257,7 +257,7 @@ variable "cloudflared_image_tag" {
 # ──────────────── Grafana Cloud Monitoring ────────────────
 
 variable "enable_alloy_to_grafana_cloud" {
-  description = "Deploy Grafana Alloy and kube-state-metrics to ship metrics and logs to Grafana Cloud Free Plan"
+  description = "Deploy Grafana Alloy to ship metrics and logs to Grafana Cloud Free Plan"
   type        = bool
   default     = false
 }
@@ -301,12 +301,6 @@ variable "monitoring_namespace" {
 
 variable "alloy_chart_version" {
   description = "Grafana Alloy Helm chart version. If null, uses the latest available version"
-  type        = string
-  default     = null
-}
-
-variable "kube_state_metrics_chart_version" {
-  description = "kube-state-metrics Helm chart version. If null, uses the latest available version"
   type        = string
   default     = null
 }
