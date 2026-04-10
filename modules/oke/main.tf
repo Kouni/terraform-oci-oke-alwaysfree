@@ -24,17 +24,17 @@ locals {
   )
 
   # Find the latest OKE-optimized ARM image matching the cluster k8s version.
-  # OKE-optimized images have pre-installed k8s packages (name contains "OKE-<version>").
-  # Extract major.minor from k8s version (e.g. "v1.35.0" → "1.35").
+  # Image names contain a date (e.g. "Oracle-Linux-8.10-aarch64-2026.02.28-0-OKE-1.35.0-1392"),
+  # so lexicographic sort on source_name selects the most recent patch.
   k8s_major_minor = join(".", slice(split(".", trimprefix(local.kubernetes_version, "v")), 0, 2))
 
-  oke_arm_images = sort([
+  oke_arm_image_map = {
     for source in data.oci_containerengine_node_pool_option.this.sources :
-    source.image_id if length(regexall("aarch64", source.source_name)) > 0 && length(regexall("OKE-${local.k8s_major_minor}", source.source_name)) > 0
-  ])
+    source.source_name => source.image_id
+    if length(regexall("aarch64", source.source_name)) > 0 && length(regexall("OKE-${local.k8s_major_minor}", source.source_name)) > 0
+  }
 
-  # Sort ensures deterministic selection when multiple images match.
-  latest_arm_image_id = local.oke_arm_images[0]
+  latest_arm_image_id = local.oke_arm_image_map[reverse(sort(keys(local.oke_arm_image_map)))[0]]
 
   # All availability domains
   availability_domains = data.oci_identity_availability_domains.this.availability_domains
@@ -53,7 +53,7 @@ resource "terraform_data" "always_free_gate" {
 resource "terraform_data" "image_validation" {
   lifecycle {
     precondition {
-      condition     = length(local.oke_arm_images) > 0
+      condition     = length(local.oke_arm_image_map) > 0
       error_message = "No OKE-optimized ARM (aarch64) image found for Kubernetes ${local.kubernetes_version}. Check that the version is available in your region."
     }
   }
