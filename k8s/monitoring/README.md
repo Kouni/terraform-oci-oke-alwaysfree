@@ -47,7 +47,7 @@ graph TB
             end
 
             subgraph NS_MONITORING["🟠 Namespace: monitoring"]
-                GF_SVC["Service: kube-prom-grafana\nClusterIP :80"]
+                GF_SVC["Service: obs-grafana\nClusterIP :80"]
                 GF["Deployment: grafana\ndocker.io/grafana/grafana"]
                 GF_PVC[("💾 PVC: grafana-data\n5 Gi")]
 
@@ -74,7 +74,7 @@ graph TB
     end
 
     CF -.->|"Secure Tunnel"| CFD
-    CFD -->|"http://kube-prom-grafana\n.monitoring.svc:80"| GF_SVC
+    CFD -->|"http://obs-grafana\n.monitoring.svc:80"| GF_SVC
     GF_SVC --> GF
     GF -->|mount| GF_PVC
     GF -->|"PromQL"| TQ
@@ -111,7 +111,7 @@ graph TB
 ```
 User ──HTTPS──▶ Cloudflare Public Hostname (grafana.your-domain.com)
      ──Tunnel──▶ cloudflared Pod (outbound-only, namespace: tunnel)
-     ──HTTP────▶ kube-prom-grafana Service (ClusterIP, namespace: monitoring)
+     ──HTTP────▶ obs-grafana Service (ClusterIP, namespace: monitoring)
      ──────────▶ Grafana Pod (:3000 → exposed on :80)
                   └──PromQL──▶ Thanos Query :9090
                                 ├──gRPC──▶ Prometheus Thanos Sidecar :10901 (live, 2d)
@@ -136,12 +136,12 @@ Long-term retention: **90 days raw / 1 year 5m / 3 years 1h** (object storage).
 | PVC | Created by | Survives `helm uninstall`? |
 |-----|-----------|--------------------------|
 | `grafana-data` | `kubectl apply -f pvc-grafana.yaml` (pre-created) | ✅ Not managed by Helm |
-| `prometheus-data-prometheus-kube-prom-prometheus-0` | StatefulSet `volumeClaimTemplate` on first install | ✅ Kubernetes never auto-deletes StatefulSet PVCs |
-| `alertmanager-data-alertmanager-kube-prom-alertmanager-0` | StatefulSet `volumeClaimTemplate` on first install | ✅ Kubernetes never auto-deletes StatefulSet PVCs |
+| `prometheus-data-prometheus-obs-prometheus-0` | StatefulSet `volumeClaimTemplate` on first install | ✅ Kubernetes never auto-deletes StatefulSet PVCs |
+| `alertmanager-data-alertmanager-obs-alertmanager-0` | StatefulSet `volumeClaimTemplate` on first install | ✅ Kubernetes never auto-deletes StatefulSet PVCs |
 
 > Grafana uses a `Deployment` with `existingClaim`, so its PVC must exist before `helm install`. Prometheus and Alertmanager use `StatefulSet`s — the operator creates their PVCs on first install and Kubernetes guarantees they are never garbage-collected when the StatefulSet is removed. On reinstall, the new StatefulSets reuse the existing PVCs by name automatically.
 >
-> PVC names for Prometheus and Alertmanager follow the convention: `<metadata.name in values.yaml>-<statefulset-name>-<ordinal>`. They are tied to the Helm release name **`kube-prom`**.
+> PVC names for Prometheus and Alertmanager follow the convention: `<metadata.name in values.yaml>-<statefulset-name>-<ordinal>`. They are tied to the Helm release name **`obs`**.
 
 ---
 
@@ -216,14 +216,14 @@ kubectl apply -f secret-thanos-objstore.yaml
 Replace `<your-password>` with a strong Grafana admin password.
 
 ```bash
-helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
+helm upgrade --install obs prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --create-namespace \
   -f k8s/monitoring/values.yaml \
   --set grafana.adminPassword="G$nq9&*!r35&"
 #  --set grafana.adminPassword="<your-password>"
-> Release "kube-prom" has been upgraded. Happy Helming!
-> NAME: kube-prom
+> Release "obs" has been upgraded. Happy Helming!
+> NAME: obs
 > LAST DEPLOYED: Fri Apr 10 02:26:36 2026
 > NAMESPACE: monitoring
 > STATUS: deployed
@@ -232,15 +232,15 @@ helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
 > TEST SUITE: None
 > NOTES:
 > kube-prometheus-stack has been installed. Check its status by running:
->   kubectl --namespace monitoring get pods -l "release=kube-prom"
+>   kubectl --namespace monitoring get pods -l "release=obs"
 > 
 > Get Grafana 'admin' user password by running:
 > 
->   kubectl --namespace monitoring get secrets kube-prom-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+>   kubectl --namespace monitoring get secrets obs-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 > 
 > Access Grafana local instance:
 > 
->   export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=kube-prom" -oname)
+>   export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=obs" -oname)
 >   kubectl --namespace monitoring port-forward $POD_NAME 3000
 > 
 > Get your grafana admin user password by running:
@@ -251,14 +251,14 @@ helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
 > Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
 ```
 
-> **Tip**: Store the admin password in your password manager. Retrieve later with: `helm get values kube-prom -n monitoring`
+> **Tip**: Store the admin password in your password manager. Retrieve later with: `helm get values obs -n monitoring`
 
 Monitor rollout:
 
 ```bash
-kubectl rollout status deployment/kube-prom-grafana -n monitoring
-kubectl rollout status statefulset/prometheus-kube-prom-prometheus -n monitoring
-kubectl rollout status statefulset/alertmanager-kube-prom-alertmanager -n monitoring
+kubectl rollout status deployment/obs-grafana -n monitoring
+kubectl rollout status statefulset/prometheus-obs-prometheus -n monitoring
+kubectl rollout status statefulset/alertmanager-obs-alertmanager -n monitoring
 ```
 
 Verify the Thanos sidecar is running alongside Prometheus:
@@ -363,7 +363,7 @@ In Grafana, navigate to **Explore → Loki datasource** and run:
    | Subdomain | `grafana` |
    | Domain | `your-domain.com` |
    | Type | `HTTP` |
-   | URL | `kube-prom-grafana.monitoring.svc.cluster.local:80` |
+   | URL | `obs-grafana.monitoring.svc.cluster.local:80` |
 
 4. Save the configuration
 
@@ -379,7 +379,7 @@ kubectl get pods -n monitoring
 kubectl get pvc -n monitoring
 
 # Stream Grafana logs
-kubectl logs -n monitoring deployment/kube-prom-grafana -c grafana
+kubectl logs -n monitoring deployment/obs-grafana -c grafana
 ```
 
 Open Grafana:
@@ -393,7 +393,7 @@ Log in with username `admin` and the password set in Step 4.
 Verify metrics: **Explore → Select Prometheus datasource → Run `up`** — all scraped targets should return `1`.
 
 > **Grafana datasources**: Two datasources are pre-configured by `values.yaml`:
-> - **Prometheus** (default) — added automatically by kube-prometheus-stack, points directly at `kube-prom-prometheus:9090` for the live 2-day window
+> - **Prometheus** (default) — added automatically by kube-prometheus-stack, points directly at `obs-prometheus:9090` for the live 2-day window
 > - **Thanos** — added via `additionalDataSources`, points at `thanos-query:9090` for the full retention period (2 days live + object storage history)
 
 ### Step 9: Set PV Reclaim Policy to Retain
@@ -406,9 +406,9 @@ kubectl get pvc -n monitoring -w
 
 # Determine which PV backs each PVC
 PV_GRAFANA=$(kubectl get pvc grafana-data -n monitoring -o jsonpath='{.spec.volumeName}')
-PV_PROMETHEUS=$(kubectl get pvc prometheus-data-prometheus-kube-prom-prometheus-0 \
+PV_PROMETHEUS=$(kubectl get pvc prometheus-data-prometheus-obs-prometheus-0 \
   -n monitoring -o jsonpath='{.spec.volumeName}')
-PV_ALERTMANAGER=$(kubectl get pvc alertmanager-data-alertmanager-kube-prom-alertmanager-0 \
+PV_ALERTMANAGER=$(kubectl get pvc alertmanager-data-alertmanager-obs-alertmanager-0 \
   -n monitoring -o jsonpath='{.spec.volumeName}')
 
 # Patch all three PVs to Retain
@@ -453,7 +453,7 @@ kubectl apply -f - <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: prometheus-data-prometheus-kube-prom-prometheus-0   # or alertmanager-data-...
+  name: prometheus-data-prometheus-obs-prometheus-0   # or alertmanager-data-...
   namespace: monitoring
 spec:
   accessModes:
@@ -476,7 +476,7 @@ The PVC will transition to `Bound`; when the StatefulSet Pod restarts it remount
 
 ```bash
 helm repo update
-helm upgrade kube-prom prometheus-community/kube-prometheus-stack \
+helm upgrade obs prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   -f k8s/monitoring/values.yaml \
   --set grafana.adminPassword="<your-password>"
@@ -488,10 +488,10 @@ All PVCs persist after `helm uninstall` — Grafana's because it is pre-created 
 
 ```bash
 # Uninstall (all PVCs are preserved)
-helm uninstall kube-prom -n monitoring
+helm uninstall obs -n monitoring
 
 # Reinstall — existing PVCs are rebound by name automatically
-helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
+helm upgrade --install obs prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   -f k8s/monitoring/values.yaml \
   --set grafana.adminPassword="<your-password>"
@@ -519,12 +519,12 @@ Since these PVCs are pre-created independently and use `storageSpec.volumeClaimT
 
 ```bash
 # Resize Prometheus data volume
-kubectl patch pvc prometheus-data-prometheus-kube-prom-prometheus-0 \
+kubectl patch pvc prometheus-data-prometheus-obs-prometheus-0 \
   -n monitoring \
   -p '{"spec":{"resources":{"requests":{"storage":"40Gi"}}}}'
 
 # Resize Alertmanager data volume
-kubectl patch pvc alertmanager-data-alertmanager-kube-prom-alertmanager-0 \
+kubectl patch pvc alertmanager-data-alertmanager-obs-alertmanager-0 \
   -n monitoring \
   -p '{"spec":{"resources":{"requests":{"storage":"4Gi"}}}}'
 
@@ -560,8 +560,8 @@ Always Free node capacity: **4 OCPU (4000m)**, **24 GB RAM** — the monitoring 
 
 | PVC | Size | Consumer |
 |-----|------|---------|
-| `prometheus-data-prometheus-kube-prom-prometheus-0` | 20 Gi | Prometheus metrics (2d local retention; historical in OCI Object Storage) |
-| `alertmanager-data-alertmanager-kube-prom-alertmanager-0` | 2 Gi | Alertmanager state |
+| `prometheus-data-prometheus-obs-prometheus-0` | 20 Gi | Prometheus metrics (2d local retention; historical in OCI Object Storage) |
+| `alertmanager-data-alertmanager-obs-alertmanager-0` | 2 Gi | Alertmanager state |
 | `grafana-data` | 5 Gi | Dashboards, datasource configs |
 | `storage-loki-0` | 10 Gi | Loki WAL and local ingester buffer |
 | `n8n-data` (existing) | 5 Gi | n8n workflows and SQLite DB |
@@ -589,14 +589,14 @@ Ensure `enable_nfs_storage = true` is applied in Terraform before deploying this
 kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
 
 # Check Grafana logs
-kubectl logs -n monitoring deployment/kube-prom-grafana -c grafana
+kubectl logs -n monitoring deployment/obs-grafana -c grafana
 
 # Verify Service endpoint
-kubectl get endpoints kube-prom-grafana -n monitoring
+kubectl get endpoints obs-grafana -n monitoring
 
 # Test connectivity from within the cluster
 kubectl run curl-test --rm -it --image=docker.io/curlimages/curl:latest \
-  -n monitoring -- curl -s http://kube-prom-grafana.monitoring.svc.cluster.local:80/api/health
+  -n monitoring -- curl -s http://obs-grafana.monitoring.svc.cluster.local:80/api/health
 ```
 
 ### `ImagePullBackOff` — CRI-O short-name rejection
@@ -609,9 +609,9 @@ OKE's control plane components are managed by Oracle and are not accessible from
 
 ### Grafana dashboard shows no data
 
-1. Verify the Prometheus datasource URL is `http://kube-prom-prometheus.monitoring.svc.cluster.local:9090`
+1. Verify the Prometheus datasource URL is `http://obs-prometheus.monitoring.svc.cluster.local:9090`
 2. Navigate to **Explore**, select the `Prometheus` datasource, and run the query `up` to confirm metrics are ingested
-3. Check Prometheus targets: `kubectl port-forward svc/kube-prom-prometheus -n monitoring 9090:9090` → open `http://localhost:9090/targets`
+3. Check Prometheus targets: `kubectl port-forward svc/obs-prometheus -n monitoring 9090:9090` → open `http://localhost:9090/targets`
 
 ---
 
@@ -624,7 +624,7 @@ Remove the `grafana.your-domain.com` public hostname from Cloudflare Dashboard w
 ### Uninstall the stack (preserve all data)
 
 ```bash
-helm uninstall kube-prom -n monitoring
+helm uninstall obs -n monitoring
 helm uninstall thanos -n monitoring
 helm uninstall loki -n monitoring
 ```
@@ -635,7 +635,7 @@ All PVCs are retained. Reinstall at any time to recover all data.
 
 ```bash
 # 1. Uninstall Helm releases
-helm uninstall kube-prom -n monitoring
+helm uninstall obs -n monitoring
 helm uninstall thanos -n monitoring
 helm uninstall loki -n monitoring
 
@@ -646,8 +646,8 @@ kubectl delete secret thanos-objstore-secret loki-r2-secret -n monitoring
 kubectl delete pvc grafana-data -n monitoring
 
 # 4. Delete Prometheus, Alertmanager, and Loki PVCs (data will be permanently lost)
-kubectl delete pvc prometheus-data-prometheus-kube-prom-prometheus-0 -n monitoring
-kubectl delete pvc alertmanager-data-alertmanager-kube-prom-alertmanager-0 -n monitoring
+kubectl delete pvc prometheus-data-prometheus-obs-prometheus-0 -n monitoring
+kubectl delete pvc alertmanager-data-alertmanager-obs-alertmanager-0 -n monitoring
 kubectl delete pvc storage-loki-0 -n monitoring
 
 # 5. Delete the namespace

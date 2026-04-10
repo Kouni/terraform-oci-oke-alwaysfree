@@ -3,11 +3,15 @@
 # Deploy:
 #   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 #   helm repo update
-#   helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
+#   helm upgrade --install obs prometheus-community/kube-prometheus-stack \
 #     --namespace monitoring \
 #     --create-namespace \
 #     -f values.yaml \
 #     --set grafana.adminPassword="<your-password>"
+
+# Override the generated fullname to "obs" — shortens all resource names
+# (e.g. prometheus-obs-prometheus instead of prometheus-kube-prom-kube-prometheus-prometheus)
+fullnameOverride: obs
 
 # ──────────────── Grafana ────────────────
 
@@ -84,7 +88,7 @@ prometheus:
     storageSpec:
       volumeClaimTemplate:
         metadata:
-          # Final PVC name: prometheus-data-prometheus-kube-prom-prometheus-0
+          # Final PVC name: prometheus-data-prometheus-obs-prometheus-0
           # Created automatically by the StatefulSet on first helm install.
           # Survives helm uninstall — Kubernetes never GCs StatefulSet PVCs.
           name: prometheus-data
@@ -136,7 +140,7 @@ alertmanager:
     storage:
       volumeClaimTemplate:
         metadata:
-          # Final PVC name: alertmanager-data-alertmanager-kube-prom-alertmanager-0
+          # Final PVC name: alertmanager-data-alertmanager-obs-alertmanager-0
           # Created automatically by the StatefulSet on first helm install.
           # Survives helm uninstall — Kubernetes never GCs StatefulSet PVCs.
           name: alertmanager-data
