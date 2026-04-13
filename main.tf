@@ -170,8 +170,8 @@ resource "helm_release" "nfs_server_provisioner" {
       name         = "nfs"
       defaultClass = false
     }
-    server = {
-      args = ["--enable-xfs-quota"]
+    extraArgs = {
+      "enable-xfs-quota" = true
     }
   })]
 
