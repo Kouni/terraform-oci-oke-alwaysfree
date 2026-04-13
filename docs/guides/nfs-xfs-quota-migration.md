@@ -63,10 +63,12 @@ kubectl scale statefulset prometheus-obs-prometheus     -n monitoring --replicas
 kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas=0
 
 # 等待全部 terminate
-kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n          --timeout=120s
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana      --timeout=120s
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=prometheus   --timeout=120s
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=alertmanager --timeout=120s
+# Deployment pods — label selector OK，短 timeout
+kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s
+kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s
+# StatefulSet pods — 用 pod name 較可靠；Prometheus 預設 terminationGracePeriodSeconds=600s
+kubectl wait --for=delete pod/prometheus-obs-prometheus-0     -n monitoring --timeout=660s
+kubectl wait --for=delete pod/alertmanager-obs-alertmanager-0 -n monitoring --timeout=660s
 ```
 
 ---
