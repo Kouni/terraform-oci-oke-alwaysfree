@@ -7,13 +7,11 @@
 #
 # Usage: ./scripts/restore-nfs-data.sh <backup-dir>
 #   backup-dir  由 backup-nfs-data.sh 建立的備份目錄 (e.g. backups/nfs-202604131400)
-#
-# Prerequisites（執行前確認）:
-#   - NFS provisioner 已重建（oci-bv-xfs + --enable-xfs-quota）
-#   - terraform apply 已完成（n8n-data、grafana-data PVC 已重建）
-#   - 所有目標 workload 已 scale down（此腳本會再次確認）
 # ──────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
+set -uo pipefail
+# NOTE: set -e is intentionally omitted. Individual PVC restore failures are
+# non-fatal — we print a warning and continue so all PVCs are attempted and
+# workloads are always scaled back up at the end.
 
 BACKUP_DIR="${1:-}"
 if [ -z "${BACKUP_DIR}" ] || [ ! -d "${BACKUP_DIR}" ]; then
@@ -24,6 +22,7 @@ fi
 
 BACKUP_DIR="$(cd "${BACKUP_DIR}" && pwd)"
 IMAGE="docker.io/library/busybox:1.36"
+ERRORS=0
 
 # ──────────────── Preflight ────────────────
 command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
@@ -33,7 +32,6 @@ echo "♻️  NFS PVC Restore"
 echo "   Source: ${BACKUP_DIR}"
 echo ""
 
-# Verify NFS provisioner is ready
 echo "🔍 Verifying NFS provisioner is ready..."
 if ! kubectl get storageclass nfs >/dev/null 2>&1; then
   echo "❌ StorageClass 'nfs' not found. Run 'terraform apply' first."
@@ -46,6 +44,19 @@ if [ -z "${NFS_POD}" ]; then
   exit 1
 fi
 echo "   ✅ NFS provisioner: ${NFS_POD}"
+
+# ──────────────── Cleanup leftover temp pods from previous runs ────────────────
+echo ""
+echo "🧹 Cleaning up any leftover temp pods..."
+for ns in n8n monitoring; do
+  leftover=$(kubectl get pod -n "${ns}" --no-headers 2>/dev/null \
+    | awk '{print $1}' | grep -E "^nfs-rst-" || true)
+  if [ -n "${leftover}" ]; then
+    echo "${leftover}" | xargs kubectl delete pod -n "${ns}" \
+      --ignore-not-found=true --grace-period=0 --force 2>/dev/null || true
+    echo "   🗑️  Removed leftover pods in ${ns}"
+  fi
+done
 
 # ──────────────── Scale down workloads ────────────────
 echo ""
@@ -67,16 +78,16 @@ for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
     }
   fi
 done
+echo "   ✅ All workloads scaled down"
 
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
-# StatefulSet PVCs are only created when the pod starts. We start the workload
-# briefly via its Operator CR to trigger PVC creation, then scale back down.
+# Patches the Operator CR to start the pod briefly (creates PVC), then stops it.
 # Args: cr_kind cr_name ns pvc_name pod_name
 ensure_statefulset_pvc() {
   local cr_kind="$1" cr_name="$2" ns="$3" pvc_name="$4" pod_name="$5"
   if kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
     echo "   ✅ PVC ${pvc_name} already exists"
-    return
+    return 0
   fi
   echo "   ⏳ Starting ${cr_name} briefly to create PVC ${pvc_name}..."
   kubectl patch "${cr_kind}" "${cr_name}" -n "${ns}" -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null || true
@@ -85,7 +96,10 @@ ensure_statefulset_pvc() {
     | grep -q "Bound"; do
     sleep 5
     retries=$((retries + 1))
-    [ "${retries}" -ge 36 ] && echo "   ❌ Timeout waiting for PVC ${pvc_name}" && return 1
+    if [ "${retries}" -ge 36 ]; then
+      echo "   ❌ Timeout waiting for PVC ${pvc_name}"
+      return 1
+    fi
   done
   echo "   ✅ PVC ${pvc_name} bound"
   kubectl patch "${cr_kind}" "${cr_name}" -n "${ns}" -p '{"spec":{"replicas":0}}' --type=merge 2>/dev/null || true
@@ -93,6 +107,8 @@ ensure_statefulset_pvc() {
     kubectl delete pod "${pod_name}" -n "${ns}" --grace-period=0 --force 2>/dev/null || true
     kubectl wait --for=delete "pod/${pod_name}" -n "${ns}" --timeout=60s 2>/dev/null || true
   }
+  # Give the NFS server a moment to flush before next mount
+  sleep 5
 }
 
 # ──────────────── Helper: restore archive into a PVC via temp sleeping pod ────────────────
@@ -103,11 +119,19 @@ restore_pvc() {
 
   if [ ! -f "${archive}" ]; then
     echo "   ⚠️  Archive not found: ${archive}, skipping ${pvc_name}"
-    return
+    return 0
   fi
   if ! kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
-    echo "   ❌ PVC ${ns}/${pvc_name} not found. Run 'terraform apply' first."
-    return 1
+    echo "   ❌ PVC ${ns}/${pvc_name} not found — skipping (run 'terraform apply' first)"
+    ERRORS=$((ERRORS + 1))
+    return 0
+  fi
+
+  # Clean up any leftover pod from a previous failed run
+  if kubectl get pod "${pod_name}" -n "${ns}" >/dev/null 2>&1; then
+    echo "   🗑️  Removing leftover pod ${pod_name}..."
+    kubectl delete pod "${pod_name}" -n "${ns}" --grace-period=0 --force 2>/dev/null || true
+    kubectl wait --for=delete "pod/${pod_name}" -n "${ns}" --timeout=60s 2>/dev/null || true
   fi
 
   echo "   ♻️  ${archive##*/} → ${ns}/${pvc_name}"
@@ -127,20 +151,27 @@ restore_pvc() {
       }
     }" >/dev/null 2>&1
 
-  kubectl wait pod "${pod_name}" -n "${ns}" --for=condition=Ready --timeout=120s >/dev/null
+  if ! kubectl wait pod "${pod_name}" -n "${ns}" --for=condition=Ready --timeout=120s >/dev/null 2>&1; then
+    echo "   ❌ Temp pod ${pod_name} failed to become Ready — skipping"
+    kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true --grace-period=0 --force 2>/dev/null || true
+    ERRORS=$((ERRORS + 1))
+    return 0
+  fi
 
-  # Stream archive into pod via exec stdin — binary-safe
-  kubectl exec -i -n "${ns}" "${pod_name}" -- \
-    tar xzf - --directory="${mount_path}" \
-    < "${archive}"
+  if kubectl exec -i -n "${ns}" "${pod_name}" -- \
+      tar xzf - --directory="${mount_path}" < "${archive}"; then
+    echo "      ✅ Done"
+  else
+    echo "      ❌ tar failed for ${pvc_name}"
+    ERRORS=$((ERRORS + 1))
+  fi
 
-  echo "      ✅ Done"
   kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true >/dev/null 2>&1 || true
 }
 
 # ──────────────── Ensure StatefulSet PVCs exist ────────────────
 echo ""
-echo "🔧 Ensuring StatefulSet PVCs exist..."
+echo "�� Ensuring StatefulSet PVCs exist..."
 ensure_statefulset_pvc "prometheus"   "obs-prometheus"   "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "prometheus-obs-prometheus-0"
 ensure_statefulset_pvc "alertmanager" "obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "alertmanager-obs-alertmanager-0"
 
@@ -152,7 +183,7 @@ restore_pvc "monitoring" "grafana-data"                                      "/v
 restore_pvc "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "/prometheus"      "${BACKUP_DIR}/prometheus.tar.gz"
 restore_pvc "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "/alertmanager"    "${BACKUP_DIR}/alertmanager.tar.gz"
 
-# ──────────────── Scale back up ────────────────
+# ──────────────── Scale back up (always runs, even if restores failed) ────────────────
 echo ""
 echo "⬆️  Scaling workloads back up..."
 kubectl scale deployment n8n-main    -n n8n        --replicas=1 2>/dev/null && echo "   ✅ n8n-main"    || true
@@ -161,7 +192,11 @@ kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas
 kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || true
 
 echo ""
-echo "✅ Restore complete."
+if [ "${ERRORS}" -gt 0 ]; then
+  echo "⚠️  Restore completed with ${ERRORS} error(s). Check output above."
+else
+  echo "✅ Restore complete."
+fi
 echo ""
 echo "📋 Verify XFS quotas:"
 echo "   NFS_POD=\$(kubectl get pod -n nfs-storage -l app=nfs-server-provisioner -o jsonpath='{.items[0].metadata.name}')"
