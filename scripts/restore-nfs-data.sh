@@ -93,6 +93,34 @@ done
 echo "   ✅ All workloads scaled down"
 WORKLOADS_SCALED_DOWN=true
 
+# ──────────────── Helper: ensure Deployment PVC exists ────────────────
+# Scales the Deployment to 1 briefly so its PVC gets created, then back to 0.
+# Args: ns deploy_name pvc_name pod_label_selector
+ensure_deployment_pvc() {
+  local ns="$1" deploy_name="$2" pvc_name="$3" pod_label="$4"
+  if kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
+    echo "   ✅ PVC ${pvc_name} already exists"
+    return 0
+  fi
+  echo "   ⏳ Starting ${deploy_name} briefly to create PVC ${pvc_name}..."
+  kubectl scale deployment "${deploy_name}" -n "${ns}" --replicas=1 >/dev/null 2>&1
+  local retries=0
+  until kubectl get pvc "${pvc_name}" -n "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null \
+    | grep -q "Bound"; do
+    sleep 5
+    retries=$((retries + 1))
+    if [ "${retries}" -ge 24 ]; then
+      echo "   ❌ Timeout waiting for PVC ${pvc_name}"
+      kubectl scale deployment "${deploy_name}" -n "${ns}" --replicas=0 >/dev/null 2>&1 || true
+      return 1
+    fi
+  done
+  echo "   ✅ PVC ${pvc_name} bound"
+  kubectl scale deployment "${deploy_name}" -n "${ns}" --replicas=0 >/dev/null 2>&1 || true
+  kubectl wait --for=delete pod -n "${ns}" -l "${pod_label}" --timeout=120s >/dev/null 2>&1 || true
+  sleep 3
+}
+
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
 # Patches the Operator CR to start the pod briefly (creates PVC), then stops it.
 # Args: cr_kind cr_name ns pvc_name pod_name
@@ -184,6 +212,7 @@ restore_pvc() {
 # ──────────────── Ensure StatefulSet PVCs exist ────────────────
 echo ""
 echo "🔧 Ensuring StatefulSet PVCs exist..."
+ensure_deployment_pvc  "monitoring" "obs-grafana"     "grafana-data"                                      "app.kubernetes.io/name=grafana"  || ERRORS=$((ERRORS+1))
 ensure_statefulset_pvc "prometheus"   "obs-prometheus"   "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "prometheus-obs-prometheus-0"   || ERRORS=$((ERRORS+1))
 ensure_statefulset_pvc "alertmanager" "obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "alertmanager-obs-alertmanager-0" || ERRORS=$((ERRORS+1))
 
