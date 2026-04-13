@@ -55,10 +55,10 @@ kubectl scale deployment obs-grafana      -n monitoring --replicas=0 2>/dev/null
 kubectl scale statefulset prometheus-obs-prometheus     -n monitoring --replicas=0 2>/dev/null && echo "   ✅ prometheus"   || echo "   ⚠️  prometheus not found"
 kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas=0 2>/dev/null && echo "   ✅ alertmanager" || echo "   ⚠️  alertmanager not found"
 echo "   ⏳ Waiting for pods to terminate..."
-kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n          --timeout=120s 2>/dev/null || true
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana      --timeout=120s 2>/dev/null || true
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=prometheus   --timeout=120s 2>/dev/null || true
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=alertmanager --timeout=120s 2>/dev/null || true
+kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s 2>/dev/null || true
+kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s 2>/dev/null || true
+kubectl wait --for=delete pod/prometheus-obs-prometheus-0     -n monitoring --timeout=660s 2>/dev/null || true
+kubectl wait --for=delete pod/alertmanager-obs-alertmanager-0 -n monitoring --timeout=660s 2>/dev/null || true
 
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
 # StatefulSet PVCs are only created when the pod starts. We start the StatefulSet

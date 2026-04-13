@@ -94,10 +94,12 @@ if [ "${SKIP_SCALEDOWN}" = "false" ]; then
   kubectl scale statefulset prometheus-obs-prometheus     -n monitoring --replicas=0 2>/dev/null && echo "   ✅ prometheus"   || echo "   ⚠️  prometheus not found"
   kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas=0 2>/dev/null && echo "   ✅ alertmanager" || echo "   ⚠️  alertmanager not found"
   echo "   ⏳ Waiting for pods to terminate..."
-  kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n          --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana      --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=prometheus   --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=alertmanager --timeout=120s 2>/dev/null || true
+  # Use label selectors for Deployments (fast), pod names for StatefulSets (reliable).
+  # Prometheus terminationGracePeriodSeconds defaults to 600s — use 660s to cover it.
+  kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s 2>/dev/null || true
+  kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s 2>/dev/null || true
+  kubectl wait --for=delete pod/prometheus-obs-prometheus-0     -n monitoring --timeout=660s 2>/dev/null || true
+  kubectl wait --for=delete pod/alertmanager-obs-alertmanager-0 -n monitoring --timeout=660s 2>/dev/null || true
   echo "   ✅ All targeted pods terminated"
 fi
 
