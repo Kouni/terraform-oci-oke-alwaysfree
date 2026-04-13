@@ -8,10 +8,7 @@
 # Usage: ./scripts/restore-nfs-data.sh <backup-dir>
 #   backup-dir  由 backup-nfs-data.sh 建立的備份目錄 (e.g. backups/nfs-202604131400)
 # ──────────────────────────────────────────────────────────────────────────────
-set -uo pipefail
-# NOTE: set -e is intentionally omitted. Individual PVC restore failures are
-# non-fatal — we print a warning and continue so all PVCs are attempted and
-# workloads are always scaled back up at the end.
+set -euo pipefail
 
 BACKUP_DIR="${1:-}"
 if [ -z "${BACKUP_DIR}" ] || [ ! -d "${BACKUP_DIR}" ]; then
@@ -23,6 +20,21 @@ fi
 BACKUP_DIR="$(cd "${BACKUP_DIR}" && pwd)"
 IMAGE="docker.io/library/busybox:1.36"
 ERRORS=0
+WORKLOADS_SCALED_DOWN=false
+
+# ──────────────── Scale-up is registered as an EXIT trap ────────────────
+# This guarantees workloads are brought back up whether the script exits
+# normally, via set -e, or due to an unhandled signal.
+scale_up() {
+  [ "${WORKLOADS_SCALED_DOWN}" = "true" ] || return 0
+  echo ""
+  echo "⬆️  Scaling workloads back up..."
+  kubectl scale deployment n8n-main    -n n8n        --replicas=1 2>/dev/null && echo "   ✅ n8n-main"    || true
+  kubectl scale deployment obs-grafana -n monitoring --replicas=1 2>/dev/null && echo "   ✅ obs-grafana" || true
+  kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ prometheus"   || true
+  kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || true
+}
+trap scale_up EXIT
 
 # ──────────────── Preflight ────────────────
 command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
@@ -79,6 +91,7 @@ for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
   fi
 done
 echo "   ✅ All workloads scaled down"
+WORKLOADS_SCALED_DOWN=true
 
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
 # Patches the Operator CR to start the pod briefly (creates PVC), then stops it.
@@ -98,6 +111,7 @@ ensure_statefulset_pvc() {
     retries=$((retries + 1))
     if [ "${retries}" -ge 36 ]; then
       echo "   ❌ Timeout waiting for PVC ${pvc_name}"
+      kubectl patch "${cr_kind}" "${cr_name}" -n "${ns}" -p '{"spec":{"replicas":0}}' --type=merge >/dev/null 2>&1 || true
       return 1
     fi
   done
@@ -123,8 +137,7 @@ restore_pvc() {
   fi
   if ! kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
     echo "   ❌ PVC ${ns}/${pvc_name} not found — skipping (run 'terraform apply' first)"
-    ERRORS=$((ERRORS + 1))
-    return 0
+    return 1
   fi
 
   # Clean up any leftover pod from a previous failed run
@@ -152,48 +165,43 @@ restore_pvc() {
     }" >/dev/null 2>&1
 
   if ! kubectl wait pod "${pod_name}" -n "${ns}" --for=condition=Ready --timeout=120s >/dev/null 2>&1; then
-    echo "   ❌ Temp pod ${pod_name} failed to become Ready — skipping"
-    kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true --grace-period=0 --force 2>/dev/null || true
-    ERRORS=$((ERRORS + 1))
-    return 0
+    echo "   ❌ Temp pod ${pod_name} failed to become Ready"
+    kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true --grace-period=0 --force >/dev/null 2>&1 || true
+    return 1
   fi
 
-  if kubectl exec -i -n "${ns}" "${pod_name}" -- \
+  if ! kubectl exec -i -n "${ns}" "${pod_name}" -- \
       tar xzf - --directory="${mount_path}" < "${archive}"; then
-    echo "      ✅ Done"
-  else
     echo "      ❌ tar failed for ${pvc_name}"
-    ERRORS=$((ERRORS + 1))
+    kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true >/dev/null 2>&1 || true
+    return 1
   fi
 
+  echo "      ✅ Done"
   kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true >/dev/null 2>&1 || true
 }
 
 # ──────────────── Ensure StatefulSet PVCs exist ────────────────
 echo ""
-echo "�� Ensuring StatefulSet PVCs exist..."
-ensure_statefulset_pvc "prometheus"   "obs-prometheus"   "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "prometheus-obs-prometheus-0"
-ensure_statefulset_pvc "alertmanager" "obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "alertmanager-obs-alertmanager-0"
+echo "🔧 Ensuring StatefulSet PVCs exist..."
+ensure_statefulset_pvc "prometheus"   "obs-prometheus"   "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "prometheus-obs-prometheus-0"   || ERRORS=$((ERRORS+1))
+ensure_statefulset_pvc "alertmanager" "obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "alertmanager-obs-alertmanager-0" || ERRORS=$((ERRORS+1))
 
 # ──────────────── Restore ────────────────
 echo ""
 echo "♻️  Restoring data..."
-restore_pvc "n8n"        "n8n-data"                                          "/home/node/.n8n"  "${BACKUP_DIR}/n8n.tar.gz"
-restore_pvc "monitoring" "grafana-data"                                      "/var/lib/grafana" "${BACKUP_DIR}/grafana.tar.gz"
-restore_pvc "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "/prometheus"      "${BACKUP_DIR}/prometheus.tar.gz"
-restore_pvc "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "/alertmanager"    "${BACKUP_DIR}/alertmanager.tar.gz"
+restore_pvc "n8n"        "n8n-data"                                          "/home/node/.n8n"  "${BACKUP_DIR}/n8n.tar.gz"          || ERRORS=$((ERRORS+1))
+restore_pvc "monitoring" "grafana-data"                                      "/var/lib/grafana" "${BACKUP_DIR}/grafana.tar.gz"       || ERRORS=$((ERRORS+1))
+restore_pvc "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "/prometheus"      "${BACKUP_DIR}/prometheus.tar.gz"   || ERRORS=$((ERRORS+1))
+restore_pvc "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "/alertmanager"    "${BACKUP_DIR}/alertmanager.tar.gz" || ERRORS=$((ERRORS+1))
 
-# ──────────────── Scale back up (always runs, even if restores failed) ────────────────
-echo ""
-echo "⬆️  Scaling workloads back up..."
-kubectl scale deployment n8n-main    -n n8n        --replicas=1 2>/dev/null && echo "   ✅ n8n-main"    || true
-kubectl scale deployment obs-grafana -n monitoring --replicas=1 2>/dev/null && echo "   ✅ obs-grafana" || true
-kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ prometheus"   || true
-kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || true
+# ──────────────── Summary ────────────────
+# (scale_up always runs via the EXIT trap above)
 
 echo ""
 if [ "${ERRORS}" -gt 0 ]; then
   echo "⚠️  Restore completed with ${ERRORS} error(s). Check output above."
+  exit 1
 else
   echo "✅ Restore complete."
 fi
