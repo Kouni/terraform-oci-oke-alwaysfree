@@ -93,32 +93,44 @@ done
 echo "   ✅ All workloads scaled down"
 WORKLOADS_SCALED_DOWN=true
 
-# ──────────────── Helper: ensure Deployment PVC exists ────────────────
-# Scales the Deployment to 1 briefly so its PVC gets created, then back to 0.
-# Args: ns deploy_name pvc_name pod_label_selector
-ensure_deployment_pvc() {
-  local ns="$1" deploy_name="$2" pvc_name="$3" pod_label="$4"
+# ──────────────── Helper: ensure standalone PVC exists ────────────────
+# For PVCs using existingClaim (e.g. grafana-data) that must pre-exist
+# before the workload starts. Creates the PVC if it is missing.
+# Args: ns pvc_name storage_class size
+ensure_standalone_pvc() {
+  local ns="$1" pvc_name="$2" storage_class="$3" size="$4"
   if kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
     echo "   ✅ PVC ${pvc_name} already exists"
     return 0
   fi
-  echo "   ⏳ Starting ${deploy_name} briefly to create PVC ${pvc_name}..."
-  kubectl scale deployment "${deploy_name}" -n "${ns}" --replicas=1 >/dev/null 2>&1
+  echo "   ⏳ Creating PVC ${pvc_name} (${size}, storageClass: ${storage_class})..."
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${pvc_name}
+  namespace: ${ns}
+  labels:
+    app.kubernetes.io/managed-by: restore-script
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ${storage_class}
+  resources:
+    requests:
+      storage: ${size}
+EOF
   local retries=0
   until kubectl get pvc "${pvc_name}" -n "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null \
     | grep -q "Bound"; do
-    sleep 5
+    sleep 3
     retries=$((retries + 1))
-    if [ "${retries}" -ge 24 ]; then
-      echo "   ❌ Timeout waiting for PVC ${pvc_name}"
-      kubectl scale deployment "${deploy_name}" -n "${ns}" --replicas=0 >/dev/null 2>&1 || true
+    if [ "${retries}" -ge 20 ]; then
+      echo "   ❌ Timeout waiting for PVC ${pvc_name} to bind"
       return 1
     fi
   done
   echo "   ✅ PVC ${pvc_name} bound"
-  kubectl scale deployment "${deploy_name}" -n "${ns}" --replicas=0 >/dev/null 2>&1 || true
-  kubectl wait --for=delete pod -n "${ns}" -l "${pod_label}" --timeout=120s >/dev/null 2>&1 || true
-  sleep 3
 }
 
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
@@ -211,8 +223,8 @@ restore_pvc() {
 
 # ──────────────── Ensure StatefulSet PVCs exist ────────────────
 echo ""
-echo "🔧 Ensuring StatefulSet PVCs exist..."
-ensure_deployment_pvc  "monitoring" "obs-grafana"     "grafana-data"                                      "app.kubernetes.io/name=grafana"  || ERRORS=$((ERRORS+1))
+echo "🔧 Ensuring PVCs exist..."
+ensure_standalone_pvc  "monitoring" "grafana-data"                                      "nfs" "5Gi"            || ERRORS=$((ERRORS+1))
 ensure_statefulset_pvc "prometheus"   "obs-prometheus"   "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "prometheus-obs-prometheus-0"   || ERRORS=$((ERRORS+1))
 ensure_statefulset_pvc "alertmanager" "obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "alertmanager-obs-alertmanager-0" || ERRORS=$((ERRORS+1))
 
