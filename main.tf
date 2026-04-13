@@ -142,6 +142,7 @@ resource "kubernetes_storage_class_v1" "oci_bv_xfs" {
   reclaim_policy         = "Delete"
   allow_volume_expansion = true
   volume_binding_mode    = "WaitForFirstConsumer"
+  mount_options          = ["pquota"]
 
   parameters = {
     "csi.storage.k8s.io/fstype" = "xfs"
@@ -154,9 +155,8 @@ resource "helm_release" "nfs_server_provisioner" {
   count = var.enable_nfs_storage ? 1 : 0
 
   name             = "nfs-server-provisioner"
-  repository       = "https://kubernetes-sigs.github.io/nfs-ganesha-server-and-external-provisioner/"
-  chart            = "nfs-server-provisioner"
-  version          = "1.8.0"
+  repository       = null
+  chart            = "${path.module}/charts"
   namespace        = "nfs-storage"
   create_namespace = true
 
@@ -173,6 +173,26 @@ resource "helm_release" "nfs_server_provisioner" {
     extraArgs = {
       "enable-xfs-quota" = true
     }
+    securityContext = {
+      capabilities = {
+        add = ["DAC_READ_SEARCH", "SYS_RESOURCE", "SYS_ADMIN"]
+      }
+    }
+    # Mount the host block device so xfs_quota can perform quota ioctls.
+    # CAP_SYS_ADMIN alone is not sufficient — xfs_quota also needs to open
+    # the underlying block device node (discovered from /proc/mounts).
+    extraVolumes = [
+      {
+        name = "host-dev-sdb"
+        hostPath = { path = "/dev/sdb" }
+      }
+    ]
+    extraVolumeMounts = [
+      {
+        name      = "host-dev-sdb"
+        mountPath = "/dev/sdb"
+      }
+    ]
   })]
 
   depends_on = [module.oke, kubernetes_storage_class_v1.oci_bv_xfs]
