@@ -57,17 +57,18 @@ ls -lh backups/nfs-<timestamp>/
 確保沒有 Pod 正在寫入 NFS PVC：
 
 ```bash
-kubectl scale deployment n8n-main         -n n8n        --replicas=0
-kubectl scale deployment obs-grafana      -n monitoring --replicas=0
-kubectl scale statefulset prometheus-obs-prometheus     -n monitoring --replicas=0
-kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas=0
+kubectl scale deployment n8n-main    -n n8n        --replicas=0
+kubectl scale deployment obs-grafana -n monitoring --replicas=0
+
+# Prometheus/Alertmanager 由 Operator 管理，直接 scale StatefulSet 無效，
+# operator 會立刻把 pod 補回來。需 patch CR 讓 operator 自己縮放。
+kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":0}}' --type=merge
+kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":0}}' --type=merge
 
 # 等待全部 terminate
-# Deployment pods — label selector OK，短 timeout
 kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s
 kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s
-# StatefulSet pods — 用 pod name；Prometheus 預設 terminationGracePeriodSeconds=600s
-# 若 660s 後仍卡在 Terminating，代表 WAL flush 異常，force delete
+# Prometheus 預設 terminationGracePeriodSeconds=600s；若仍卡住就 force delete
 for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
   kubectl wait --for=delete "pod/${pod}" -n monitoring --timeout=660s 2>/dev/null || \
     kubectl delete pod "${pod}" -n monitoring --grace-period=0 --force
