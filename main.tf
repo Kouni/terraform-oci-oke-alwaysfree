@@ -183,7 +183,7 @@ resource "helm_release" "nfs_server_provisioner" {
     # the underlying block device node (discovered from /proc/mounts).
     extraVolumes = [
       {
-        name = "host-dev-sdb"
+        name     = "host-dev-sdb"
         hostPath = { path = "/dev/sdb" }
       }
     ]
