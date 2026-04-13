@@ -128,6 +128,28 @@ resource "helm_release" "metrics_server" {
 # NFS Storage (dynamic PV provisioning)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# XFS-backed StorageClass for the NFS server's backing PVC.
+# XFS project quotas (--enable-xfs-quota) enforce per-PVC storage limits so pods
+# cannot write beyond their requests.storage.
+resource "kubernetes_storage_class_v1" "oci_bv_xfs" {
+  count = var.enable_nfs_storage ? 1 : 0
+
+  metadata {
+    name = "oci-bv-xfs"
+  }
+
+  storage_provisioner    = "blockvolume.csi.oraclecloud.com"
+  reclaim_policy         = "Delete"
+  allow_volume_expansion = true
+  volume_binding_mode    = "WaitForFirstConsumer"
+
+  parameters = {
+    "csi.storage.k8s.io/fstype" = "xfs"
+  }
+
+  depends_on = [module.oke]
+}
+
 resource "helm_release" "nfs_server_provisioner" {
   count = var.enable_nfs_storage ? 1 : 0
 
@@ -141,16 +163,19 @@ resource "helm_release" "nfs_server_provisioner" {
   values = [yamlencode({
     persistence = {
       enabled      = true
-      storageClass = "oci-bv"
+      storageClass = "oci-bv-xfs"
       size         = "${var.nfs_volume_size_in_gbs}Gi"
     }
     storageClass = {
       name         = "nfs"
       defaultClass = false
     }
+    server = {
+      args = ["--enable-xfs-quota"]
+    }
   })]
 
-  depends_on = [module.oke]
+  depends_on = [module.oke, kubernetes_storage_class_v1.oci_bv_xfs]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
