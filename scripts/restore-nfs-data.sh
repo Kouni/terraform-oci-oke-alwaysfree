@@ -50,10 +50,11 @@ echo "   ✅ NFS provisioner: ${NFS_POD}"
 # ──────────────── Scale down workloads ────────────────
 echo ""
 echo "⬇️  Scaling down workloads before restore..."
-kubectl scale deployment n8n-main         -n n8n        --replicas=0 2>/dev/null && echo "   ✅ n8n-main"      || echo "   ⚠️  n8n-main not found"
-kubectl scale deployment obs-grafana      -n monitoring --replicas=0 2>/dev/null && echo "   ✅ obs-grafana"   || echo "   ⚠️  obs-grafana not found"
-kubectl scale statefulset prometheus-obs-prometheus     -n monitoring --replicas=0 2>/dev/null && echo "   ✅ prometheus"   || echo "   ⚠️  prometheus not found"
-kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas=0 2>/dev/null && echo "   ✅ alertmanager" || echo "   ⚠️  alertmanager not found"
+kubectl scale deployment n8n-main    -n n8n        --replicas=0 2>/dev/null && echo "   ✅ n8n-main"    || echo "   ⚠️  n8n-main not found"
+kubectl scale deployment obs-grafana -n monitoring --replicas=0 2>/dev/null && echo "   ✅ obs-grafana" || echo "   ⚠️  obs-grafana not found"
+# Prometheus/Alertmanager are managed by the Operator — patch the CR, not the StatefulSet.
+kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":0}}' --type=merge 2>/dev/null && echo "   ✅ prometheus"   || echo "   ⚠️  prometheus CR not found"
+kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":0}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || echo "   ⚠️  alertmanager CR not found"
 echo "   ⏳ Waiting for pods to terminate..."
 kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s 2>/dev/null || true
 kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s 2>/dev/null || true
@@ -68,17 +69,17 @@ for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
 done
 
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
-# StatefulSet PVCs are only created when the pod starts. We start the StatefulSet
-# briefly to trigger PVC creation, then immediately scale back down.
+# StatefulSet PVCs are only created when the pod starts. We start the workload
+# briefly via its Operator CR to trigger PVC creation, then scale back down.
+# Args: cr_kind cr_name ns pvc_name pod_name
 ensure_statefulset_pvc() {
-  local sts_name="$1" ns="$2" pvc_name="$3"
+  local cr_kind="$1" cr_name="$2" ns="$3" pvc_name="$4" pod_name="$5"
   if kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
     echo "   ✅ PVC ${pvc_name} already exists"
     return
   fi
-  echo "   ⏳ Starting ${sts_name} briefly to create PVC ${pvc_name}..."
-  kubectl scale statefulset "${sts_name}" -n "${ns}" --replicas=1 2>/dev/null || true
-  # Wait until PVC is bound
+  echo "   ⏳ Starting ${cr_name} briefly to create PVC ${pvc_name}..."
+  kubectl patch "${cr_kind}" "${cr_name}" -n "${ns}" -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null || true
   local retries=0
   until kubectl get pvc "${pvc_name}" -n "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null \
     | grep -q "Bound"; do
@@ -87,9 +88,11 @@ ensure_statefulset_pvc() {
     [ "${retries}" -ge 36 ] && echo "   ❌ Timeout waiting for PVC ${pvc_name}" && return 1
   done
   echo "   ✅ PVC ${pvc_name} bound"
-  kubectl scale statefulset "${sts_name}" -n "${ns}" --replicas=0 2>/dev/null || true
-  kubectl wait --for=delete pod -n "${ns}" \
-    -l "statefulset.kubernetes.io/pod-name=${sts_name}-0" --timeout=120s 2>/dev/null || true
+  kubectl patch "${cr_kind}" "${cr_name}" -n "${ns}" -p '{"spec":{"replicas":0}}' --type=merge 2>/dev/null || true
+  kubectl wait --for=delete "pod/${pod_name}" -n "${ns}" --timeout=660s 2>/dev/null || {
+    kubectl delete pod "${pod_name}" -n "${ns}" --grace-period=0 --force 2>/dev/null || true
+    kubectl wait --for=delete "pod/${pod_name}" -n "${ns}" --timeout=60s 2>/dev/null || true
+  }
 }
 
 # ──────────────── Helper: restore archive into a PVC via temp sleeping pod ────────────────
@@ -138,8 +141,8 @@ restore_pvc() {
 # ──────────────── Ensure StatefulSet PVCs exist ────────────────
 echo ""
 echo "🔧 Ensuring StatefulSet PVCs exist..."
-ensure_statefulset_pvc "prometheus-obs-prometheus"     "monitoring" "prometheus-data-prometheus-obs-prometheus-0"
-ensure_statefulset_pvc "alertmanager-obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0"
+ensure_statefulset_pvc "prometheus"   "obs-prometheus"   "monitoring" "prometheus-data-prometheus-obs-prometheus-0"       "prometheus-obs-prometheus-0"
+ensure_statefulset_pvc "alertmanager" "obs-alertmanager" "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "alertmanager-obs-alertmanager-0"
 
 # ──────────────── Restore ────────────────
 echo ""
@@ -152,10 +155,10 @@ restore_pvc "monitoring" "alertmanager-data-alertmanager-obs-alertmanager-0" "/a
 # ──────────────── Scale back up ────────────────
 echo ""
 echo "⬆️  Scaling workloads back up..."
-kubectl scale deployment n8n-main         -n n8n        --replicas=1 2>/dev/null && echo "   ✅ n8n-main"      || true
-kubectl scale deployment obs-grafana      -n monitoring --replicas=1 2>/dev/null && echo "   ✅ obs-grafana"   || true
-kubectl scale statefulset prometheus-obs-prometheus     -n monitoring --replicas=1 2>/dev/null && echo "   ✅ prometheus"   || true
-kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas=1 2>/dev/null && echo "   ✅ alertmanager" || true
+kubectl scale deployment n8n-main    -n n8n        --replicas=1 2>/dev/null && echo "   ✅ n8n-main"    || true
+kubectl scale deployment obs-grafana -n monitoring --replicas=1 2>/dev/null && echo "   ✅ obs-grafana" || true
+kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ prometheus"   || true
+kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || true
 
 echo ""
 echo "✅ Restore complete."
