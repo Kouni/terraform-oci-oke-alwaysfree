@@ -57,8 +57,15 @@ kubectl scale statefulset alertmanager-obs-alertmanager -n monitoring --replicas
 echo "   ⏳ Waiting for pods to terminate..."
 kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s 2>/dev/null || true
 kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s 2>/dev/null || true
-kubectl wait --for=delete pod/prometheus-obs-prometheus-0     -n monitoring --timeout=660s 2>/dev/null || true
-kubectl wait --for=delete pod/alertmanager-obs-alertmanager-0 -n monitoring --timeout=660s 2>/dev/null || true
+for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
+  if kubectl get pod "${pod}" -n monitoring >/dev/null 2>&1; then
+    kubectl wait --for=delete "pod/${pod}" -n monitoring --timeout=660s 2>/dev/null || {
+      echo "   ⚠️  ${pod} stuck in Terminating — force deleting"
+      kubectl delete pod "${pod}" -n monitoring --grace-period=0 --force 2>/dev/null || true
+      kubectl wait --for=delete "pod/${pod}" -n monitoring --timeout=60s 2>/dev/null || true
+    }
+  fi
+done
 
 # ──────────────── Helper: ensure StatefulSet PVC exists ────────────────
 # StatefulSet PVCs are only created when the pod starts. We start the StatefulSet
