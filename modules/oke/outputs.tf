@@ -5,7 +5,7 @@ output "cluster_id" {
 
 output "cluster_endpoint" {
   description = "The Kubernetes API endpoint of the OKE cluster"
-  value       = "https://${oci_containerengine_cluster.this.endpoints[0].public_endpoint}"
+  value       = "https://${try(oci_containerengine_cluster.this.endpoints[0].public_endpoint, "")}"
 }
 
 output "kubeconfig_command" {
