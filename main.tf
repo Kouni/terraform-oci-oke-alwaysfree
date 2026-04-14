@@ -178,19 +178,18 @@ resource "helm_release" "nfs_server_provisioner" {
         add = ["DAC_READ_SEARCH", "SYS_RESOURCE", "SYS_ADMIN"]
       }
     }
-    # Mount the host block device so xfs_quota can perform quota ioctls.
-    # CAP_SYS_ADMIN alone is not sufficient — xfs_quota also needs to open
-    # the underlying block device node (discovered from /proc/mounts).
+    # Mount host /dev so xfs_quota can open the backing block device
+    # (discovered dynamically from /proc/mounts) for quota ioctls.
     extraVolumes = [
       {
-        name     = "host-dev-sdb"
-        hostPath = { path = "/dev/sdb" }
+        name     = "host-dev"
+        hostPath = { path = "/dev", type = "Directory" }
       }
     ]
     extraVolumeMounts = [
       {
-        name      = "host-dev-sdb"
-        mountPath = "/dev/sdb"
+        name      = "host-dev"
+        mountPath = "/dev"
       }
     ]
   })]
