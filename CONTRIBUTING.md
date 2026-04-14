@@ -56,11 +56,11 @@ terraform validate
 ├── modules/
 │   ├── network/               # VCN, subnets, gateways, security lists
 │   ├── oke/                   # OKE cluster and node pool
-│   ├── budget/                # OCI monthly budget and alerts
-│   └── monitoring/            # Grafana Alloy + kube-state-metrics (optional)
+│   └── budget/                # OCI monthly budget and alerts
 ├── k8s/                       # Kubernetes manifests and deployment guides
 ├── docs/                      # Architecture decisions and guides
-└── backup-n8n.sh              # n8n data backup helper script
+├── scripts/                   # Backup and restore scripts
+└── charts/                    # Vendored Helm charts (nfs-server-provisioner)
 ```
 
 ---
@@ -132,7 +132,7 @@ Follow [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0
 
 **Types:** `feat`, `fix`, `docs`, `chore`, `refactor`, `perf`, `ci`, `test`, `build`, `style`
 
-**Scopes (optional):** `network`, `oke`, `budget`, `monitoring`, `k8s`, `ci`
+**Scopes (optional):** `network`, `oke`, `budget`, `nfs`, `k8s`, `ci`
 
 Examples:
 - `feat(oke): add support for custom boot volume size validation`

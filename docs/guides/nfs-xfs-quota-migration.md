@@ -37,15 +37,15 @@ kubectl get pvc -A | grep nfs
 
 腳本會自動：
 
-1. Scale down：n8n、grafana、prometheus、alertmanager
-2. 使用 temp Pod + tar 備份各 PVC 資料至 `backups/nfs-<timestamp>/`
+1. Scale down：n8n
+2. 使用 temp Pod + tar 備份 n8n PVC 資料至 `backups/nfs-<timestamp>/`
 3. Scale back up
 
 備份後確認：
 
 ```bash
 ls -lh backups/nfs-<timestamp>/
-# 應看到：n8n.tar.gz, grafana.tar.gz, prometheus.tar.gz, alertmanager.tar.gz
+# 應看到：n8n.tar.gz
 ```
 
 > ⚠️ **請確保 `backups/` 目錄已備份到安全位置再繼續。**
@@ -57,22 +57,10 @@ ls -lh backups/nfs-<timestamp>/
 確保沒有 Pod 正在寫入 NFS PVC：
 
 ```bash
-kubectl scale deployment n8n-main    -n n8n        --replicas=0
-kubectl scale deployment obs-grafana -n monitoring --replicas=0
+kubectl scale deployment n8n-main -n n8n --replicas=0
 
-# Prometheus/Alertmanager 由 Operator 管理，直接 scale StatefulSet 無效，
-# operator 會立刻把 pod 補回來。需 patch CR 讓 operator 自己縮放。
-kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":0}}' --type=merge
-kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":0}}' --type=merge
-
-# 等待全部 terminate
-kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s
-kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s
-# Prometheus 預設 terminationGracePeriodSeconds=600s；若仍卡住就 force delete
-for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
-  kubectl wait --for=delete "pod/${pod}" -n monitoring --timeout=660s 2>/dev/null || \
-    kubectl delete pod "${pod}" -n monitoring --grace-period=0 --force
-done
+# 等待 terminate
+kubectl wait --for=delete pod -n n8n -l app.kubernetes.io/name=n8n --timeout=120s
 ```
 
 ---
@@ -86,12 +74,6 @@ done
 helm uninstall nfs-server-provisioner -n nfs-storage
 
 # 刪除 NFS PVC 和其下的所有子目錄 PVCs
-# （StatefulSet PVCs 在 workload scale down 後仍存在，需手動刪除）
-kubectl delete pvc -n monitoring \
-  alertmanager-data-alertmanager-obs-alertmanager-0 \
-  grafana-data \
-  prometheus-data-prometheus-obs-prometheus-0
-
 kubectl delete pvc -n n8n n8n-data
 
 # 刪除 NFS backing PVC（這會觸發 OCI block volume 刪除）
@@ -113,7 +95,7 @@ Terraform 會：
 
 1. 建立 StorageClass `oci-bv-xfs`（`blockvolume.csi.oraclecloud.com` + `fstype=xfs`）
 2. 重建 `nfs-server-provisioner`，使用 `oci-bv-xfs` + `--enable-xfs-quota`
-3. 重建 Terraform-managed PVCs（`n8n-data`、`grafana-data`）
+3. 重建 Terraform-managed PVC（`n8n-data`）
 
 等待 NFS provisioner 就緒：
 
@@ -146,10 +128,9 @@ kubectl exec -n nfs-storage "${NFS_POD}" -- mount | grep /export
 
 腳本會自動：
 
-1. Scale down workloads（確保 PVC 不被寫入）
-2. 觸發 StatefulSet 短暫啟動以建立 PVC，再立即 scale down
-3. 用 temp Pod + tar 將資料還原至各 PVC
-4. Scale back up
+1. Scale down n8n（確保 PVC 不被寫入）
+2. 用 temp Pod + tar 將資料還原至 PVC
+3. Scale back up
 
 ---
 
@@ -158,7 +139,7 @@ kubectl exec -n nfs-storage "${NFS_POD}" -- mount | grep /export
 ### 確認服務正常
 
 ```bash
-kubectl get pod -A | grep -E "n8n|monitoring"
+kubectl get pod -n n8n
 kubectl get pvc -A
 ```
 
@@ -181,16 +162,16 @@ Project ID   Used   Soft   Hard Warn/Grace
 ---------- ---------------------------------
 #0              0      0      0  00 [------]
 #1          7.4M      0      5G  00 [------]   ← n8n-data (5 GiB limit)
-#2         51.3M      0      5G  00 [------]   ← grafana-data (5 GiB limit)
 ...
 ```
 
-### 確認 Dashboard
+### 確認 kubelet Volume Metrics
 
-在 Grafana → OKE Cluster Overview → Volume Usage 面板：
-
-- "Used" 欄每個 PVC 應顯示**不同值**（不再全是同一個數字）
-- "FS Used %" 應反映各 PVC 實際使用率
+```bash
+# kubelet 內建 volume stats 可驗證 per-PVC used/capacity
+kubectl get --raw "/api/v1/nodes/$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')/proxy/stats/summary" | \
+  jq '.pods[].volume[]? | select(.pvcRef != null) | {ns: .pvcRef.namespace, pvc: .pvcRef.name, used: .usedBytes, cap: .capacityBytes}'
+```
 
 ---
 
