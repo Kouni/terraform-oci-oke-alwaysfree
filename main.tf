@@ -36,7 +36,7 @@ resource "terraform_data" "always_free_validation" {
     }
     precondition {
       condition = (
-        (var.config_file_profile != null && var.tenancy_ocid == null && var.user_ocid == null && var.fingerprint == null && var.private_key_path == null) ||
+        (var.config_file_profile != null && var.tenancy_ocid == null && var.user_ocid == null && var.fingerprint == null && var.private_key_path == null && var.region == null) ||
         (var.config_file_profile == null && var.tenancy_ocid != null && var.user_ocid != null && var.fingerprint != null && var.private_key_path != null && var.region != null)
       )
       error_message = "Specify either config_file_profile (recommended) OR all of tenancy_ocid, user_ocid, fingerprint, private_key_path, and region — not both."
