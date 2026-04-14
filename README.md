@@ -166,6 +166,7 @@ kubectl get nodes
 | `boot_volume_size_in_gbs` | Boot volume (GB) per node | `number` | `64` | no |
 | `ssh_public_key` | SSH public key for nodes | `string` | `null` | no |
 | `enable_metrics_server` | Deploy metrics-server for `kubectl top` | `bool` | `true` | no |
+| `metrics_server_chart_version` | metrics-server Helm chart version (null = latest) | `string` | `null` | no |
 | `enable_nfs_storage` | Deploy NFS server with dynamic PV provisioning | `bool` | `false` | no |
 | `nfs_volume_size_in_gbs` | NFS backing block volume size (GB) | `number` | `136` | no |
 | `vcn_cidr` | VCN CIDR block | `string` | `"10.0.0.0/16"` | no |

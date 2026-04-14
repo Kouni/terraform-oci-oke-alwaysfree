@@ -1,4 +1,4 @@
-# OCI Authentication
+# ──────────────── OCI Authentication ────────────────
 # Option 1: Config file profile (recommended — reads auth from ~/.oci/config)
 config_file_profile = "DEFAULT"
 
@@ -9,55 +9,45 @@ config_file_profile = "DEFAULT"
 # private_key_path = "~/.oci/oci_api_key.pem"
 # region           = "ap-tokyo-1"
 
-# Compartment (required)
+# ──────────────── Compartment ────────────────
 compartment_ocid = "ocid1.tenancy.oc1..example"  # Use tenancy OCID for root compartment
 
-# Cluster
+# ──────────────── Cluster ────────────────
 # cluster_name       = "formosa"
-# kubernetes_version = "v1.30.1"  # null = latest available
+# kubernetes_version = null  # null = latest available; pin with e.g. "v1.32.1"
 
-# Node pool (Always Free limits: 4 OCPUs, 24 GB RAM, 200 GB boot volume total)
+# ──────────────── Node Pool ────────────────
+# Always Free limits: 4 OCPUs, 24 GB RAM, 200 GB block volume total
 # node_count              = 1
 # node_ocpus              = 4
 # node_memory_in_gbs      = 24
 # boot_volume_size_in_gbs = 64
+# ssh_public_key          = "ssh-rsa AAAA..."
 
-# NFS Storage (dynamic PV provisioning backed by OCI Block Volume)
+# ──────────────── Network ────────────────
+# vcn_cidr           = "10.0.0.0/16"
+# enable_nat_gateway = false  # WARNING: NAT Gateway is NOT Always Free
+
+# ──────────────── Budget Alert ────────────────
+# enable_budget_alert = true
+notification_email    = "you@example.com"
+
+# ──────────────── Cluster Add-ons ────────────────
+# enable_metrics_server        = true
+# metrics_server_chart_version = null  # null = latest; pin with e.g. "3.12.2"
+
+# ──────────────── NFS Storage ────────────────
 # Boot (64 GB) + NFS (136 GB) = 200 GB Always Free limit
 # enable_nfs_storage     = false
 # nfs_volume_size_in_gbs = 136
 
-# Cluster add-ons
-# enable_metrics_server = true  # Deploys metrics-server; required for kubectl top
-
-# SSH access to worker nodes (optional)
-# ssh_public_key = "ssh-rsa AAAA..."
-
-# Network
-# vcn_cidr           = "10.0.0.0/16"
-# enable_nat_gateway = false  # WARNING: NAT Gateway is NOT Always Free
-
-# Budget alert (enabled by default — set email to receive alerts)
-# enable_budget_alert = true
-notification_email    = "you@example.com"
-
-# Tags
+# ──────────────── Tags ────────────────
 # freeform_tags = {
 #   "alwaysfree" = "true"
 #   "Owner"      = "Kouni"
 # }
 
-# Cloudflare Zero Trust Tunnel (shared ingress for all services)
-# Prerequisites:
-#   1. Create Tunnel: https://one.dash.cloudflare.com → Networks → Tunnels
-#   2. Copy the tunnel token — it is used as cloudflare_tunnel_token below
-# enable_cloudflare_tunnel      = false
-# cloudflare_tunnel_namespace   = "tunnel"
-# cloudflared_secret_name       = "cloudflare-tunnel"
-# cloudflared_image_tag         = "latest"  # pin with e.g. "2025.4.1" for reproducible deployments
-# cloudflare_tunnel_token       = "eyJhIjoixx..."  # sensitive — do not commit
-
-# n8n (workflow automation — requires enable_nfs_storage = true AND enable_cloudflare_tunnel = true)
+# ──────────────── n8n ────────────────
 # Prerequisites:
 #   1. enable_nfs_storage = true  (n8n uses the NFS StorageClass for persistent data)
 #   2. enable_cloudflare_tunnel = true  (Cloudflare Tunnel provides ingress — no OCI LB needed)
@@ -72,3 +62,13 @@ notification_email    = "you@example.com"
 # n8n_image_tag           = "latest"  # pin with e.g. "1.94.1" for reproducible deployments
 # n8n_host                = "n8n.example.com"
 # n8n_encryption_key      = "replace-with-openssl-rand-hex-32-output"  # sensitive — do not commit
+
+# ──────────────── Cloudflare Tunnel ────────────────
+# Prerequisites:
+#   1. Create Tunnel: https://one.dash.cloudflare.com → Networks → Tunnels
+#   2. Copy the tunnel token — it is used as cloudflare_tunnel_token below
+# enable_cloudflare_tunnel      = false
+# cloudflare_tunnel_namespace   = "tunnel"
+# cloudflared_secret_name       = "cloudflare-tunnel"
+# cloudflared_image_tag         = "latest"  # pin with e.g. "2025.4.1" for reproducible deployments
+# cloudflare_tunnel_token       = "eyJhIjoixx..."  # sensitive — do not commit
