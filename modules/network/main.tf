@@ -42,6 +42,11 @@ resource "oci_core_internet_gateway" "this" {
   freeform_tags = var.freeform_tags
 }
 
+# Always created even though no route table currently references it.
+# OCI does not allow IGW and SGW (All Services) in the same route table,
+# so the SGW is unused in this all-public-subnet design.  It exists to
+# enable a future private-subnet migration without requiring a destroy/
+# recreate cycle — just add SGW routes when converting worker subnet.
 resource "oci_core_service_gateway" "this" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.this.id
