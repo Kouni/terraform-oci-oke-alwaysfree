@@ -89,24 +89,9 @@ backup_pvc() {
 if [ "${SKIP_SCALEDOWN}" = "false" ]; then
   echo ""
   echo "⬇️  Scaling down workloads..."
-  kubectl scale deployment n8n-main    -n n8n        --replicas=0 2>/dev/null && echo "   ✅ n8n-main"    || echo "   ⚠️  n8n-main not found"
-  kubectl scale deployment obs-grafana -n monitoring --replicas=0 2>/dev/null && echo "   ✅ obs-grafana" || echo "   ⚠️  obs-grafana not found"
-  # Prometheus/Alertmanager are managed by the Operator — patch the CR, not the StatefulSet.
-  # Scaling the StatefulSet directly is overridden by the operator immediately.
-  kubectl patch prometheus    obs-prometheus    -n monitoring -p '{"spec":{"replicas":0}}' --type=merge 2>/dev/null && echo "   ✅ prometheus"   || echo "   ⚠️  prometheus CR not found"
-  kubectl patch alertmanager  obs-alertmanager  -n monitoring -p '{"spec":{"replicas":0}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || echo "   ⚠️  alertmanager CR not found"
+  kubectl scale deployment n8n-main -n n8n --replicas=0 2>/dev/null && echo "   ✅ n8n-main" || echo "   ⚠️  n8n-main not found"
   echo "   ⏳ Waiting for pods to terminate..."
-  kubectl wait --for=delete pod -n n8n        -l app.kubernetes.io/name=n8n     --timeout=120s 2>/dev/null || true
-  kubectl wait --for=delete pod -n monitoring -l app.kubernetes.io/name=grafana --timeout=120s 2>/dev/null || true
-  for pod in prometheus-obs-prometheus-0 alertmanager-obs-alertmanager-0; do
-    if kubectl get pod "${pod}" -n monitoring >/dev/null 2>&1; then
-      kubectl wait --for=delete "pod/${pod}" -n monitoring --timeout=660s 2>/dev/null || {
-        echo "   ⚠️  ${pod} stuck in Terminating — force deleting"
-        kubectl delete pod "${pod}" -n monitoring --grace-period=0 --force 2>/dev/null || true
-        kubectl wait --for=delete "pod/${pod}" -n monitoring --timeout=60s 2>/dev/null || true
-      }
-    fi
-  done
+  kubectl wait --for=delete pod -n n8n -l app.kubernetes.io/name=n8n --timeout=120s 2>/dev/null || true
   echo "   ✅ All targeted pods terminated"
 fi
 
@@ -117,32 +102,17 @@ echo "💾 Backing up PVC data..."
 if [ "${SKIP_SCALEDOWN}" = "true" ]; then
   N8N_POD=$(kubectl get pod -n n8n -l app.kubernetes.io/name=n8n \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-  GRAFANA_POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-  PROM_POD="prometheus-obs-prometheus-0"
-  AM_POD="alertmanager-obs-alertmanager-0"
 
-  [ -n "${N8N_POD}" ]     && backup_from_running_pod n8n        "${N8N_POD}"     /home/node/.n8n  n8n.tar.gz
-  [ -n "${GRAFANA_POD}" ] && backup_from_running_pod monitoring "${GRAFANA_POD}" /var/lib/grafana grafana.tar.gz
-  kubectl get pod "${PROM_POD}" -n monitoring >/dev/null 2>&1 && \
-    backup_from_running_pod monitoring "${PROM_POD}" /prometheus  prometheus.tar.gz
-  kubectl get pod "${AM_POD}"  -n monitoring >/dev/null 2>&1 && \
-    backup_from_running_pod monitoring "${AM_POD}"   /alertmanager alertmanager.tar.gz
+  [ -n "${N8N_POD}" ] && backup_from_running_pod n8n "${N8N_POD}" /home/node/.n8n n8n.tar.gz
 else
-  backup_pvc n8n        "n8n-data"                                              "/home/node/.n8n"  "n8n.tar.gz"
-  backup_pvc monitoring "grafana-data"                                          "/var/lib/grafana" "grafana.tar.gz"
-  backup_pvc monitoring "prometheus-data-prometheus-obs-prometheus-0"           "/prometheus"      "prometheus.tar.gz"
-  backup_pvc monitoring "alertmanager-data-alertmanager-obs-alertmanager-0"     "/alertmanager"    "alertmanager.tar.gz"
+  backup_pvc n8n "n8n-data" "/home/node/.n8n" "n8n.tar.gz"
 fi
 
 # ──────────────── Scale back up ────────────────
 if [ "${SKIP_SCALEDOWN}" = "false" ]; then
   echo ""
   echo "⬆️  Scaling workloads back up..."
-  kubectl scale deployment n8n-main    -n n8n        --replicas=1 2>/dev/null && echo "   ✅ n8n-main"    || true
-  kubectl scale deployment obs-grafana -n monitoring --replicas=1 2>/dev/null && echo "   ✅ obs-grafana" || true
-  kubectl patch prometheus   obs-prometheus   -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ prometheus"   || true
-  kubectl patch alertmanager obs-alertmanager -n monitoring -p '{"spec":{"replicas":1}}' --type=merge 2>/dev/null && echo "   ✅ alertmanager" || true
+  kubectl scale deployment n8n-main -n n8n --replicas=1 2>/dev/null && echo "   ✅ n8n-main" || true
 fi
 
 # ──────────────── Summary ────────────────

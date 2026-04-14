@@ -13,15 +13,15 @@ Backs up n8n Kubernetes Secrets, SQLite database, and Helm values to `backups/`.
 
 ## backup-nfs-data.sh
 
-Backs up all NFS-backed PVC data to `backups/`.
+Backs up the n8n NFS-backed PVC data to `backups/`. Automatically scales down n8n before backup and scales back up after.
 
 ```bash
-./scripts/backup-nfs-data.sh
+./scripts/backup-nfs-data.sh [--skip-scaledown]
 ```
 
 ## restore-nfs-data.sh
 
-Restores PVC data from a backup created by `backup-nfs-data.sh`.
+Restores n8n PVC data from a backup created by `backup-nfs-data.sh`. Used after NFS backing volume migration (e.g., ext4 → XFS).
 
 ```bash
 ./scripts/restore-nfs-data.sh <backup-directory>
