@@ -84,7 +84,7 @@ data "oci_containerengine_cluster_kube_config" "this" {
 
 locals {
   kubeconfig             = yamldecode(data.oci_containerengine_cluster_kube_config.this.content)
-  cluster_ca_certificate = base64decode(local.kubeconfig.clusters[0].cluster["certificate-authority-data"])
+  cluster_ca_certificate = base64decode(try(local.kubeconfig.clusters[0].cluster["certificate-authority-data"], ""))
 }
 
 provider "helm" {
@@ -259,6 +259,7 @@ resource "kubernetes_namespace_v1" "tunnel" {
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
+  count = var.enable_nfs_storage ? 1 : 0
   metadata {
     name      = "n8n-data"
     namespace = kubernetes_namespace_v1.n8n.metadata[0].name
@@ -282,11 +283,6 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
     prevent_destroy = true
     # PVC spec is immutable after binding; ignore any drift
     ignore_changes = [spec]
-
-    precondition {
-      condition     = var.enable_nfs_storage
-      error_message = "kubernetes_persistent_volume_claim_v1.n8n_data requires the NFS StorageClass. Set enable_nfs_storage = true before applying."
-    }
   }
 
   depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]
@@ -372,7 +368,7 @@ resource "helm_release" "n8n" {
     # Persistent storage — uses Terraform-managed PVC so data survives helm uninstall
     persistence = {
       enabled       = true
-      existingClaim = kubernetes_persistent_volume_claim_v1.n8n_data.metadata[0].name
+      existingClaim = kubernetes_persistent_volume_claim_v1.n8n_data[0].metadata[0].name
     }
 
     # Use pre-created K8s Secret for n8n core settings
@@ -423,50 +419,6 @@ resource "helm_release" "n8n" {
   }
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Grafana Cloud Monitoring (metrics + logs)
-# ──────────────────────────────────────────────────────────────────────────────
-
-resource "terraform_data" "grafana_monitoring_validation" {
-  count = var.enable_alloy_to_grafana_cloud ? 1 : 0
-
-  lifecycle {
-    precondition {
-      condition     = var.grafana_cloud_prometheus_url != null
-      error_message = "grafana_cloud_prometheus_url is required when enable_alloy_to_grafana_cloud is true."
-    }
-    precondition {
-      condition     = var.grafana_cloud_prometheus_username != null
-      error_message = "grafana_cloud_prometheus_username is required when enable_alloy_to_grafana_cloud is true."
-    }
-    precondition {
-      condition     = var.grafana_cloud_loki_url != null
-      error_message = "grafana_cloud_loki_url is required when enable_alloy_to_grafana_cloud is true."
-    }
-    precondition {
-      condition     = var.grafana_cloud_loki_username != null
-      error_message = "grafana_cloud_loki_username is required when enable_alloy_to_grafana_cloud is true."
-    }
-    precondition {
-      condition     = var.grafana_cloud_api_key != null
-      error_message = "grafana_cloud_api_key is required when enable_alloy_to_grafana_cloud is true."
-    }
-  }
-}
-
-module "monitoring" {
-  source = "./modules/monitoring"
-  count  = var.enable_alloy_to_grafana_cloud ? 1 : 0
-
-  grafana_cloud_prometheus_url      = var.grafana_cloud_prometheus_url
-  grafana_cloud_prometheus_username = var.grafana_cloud_prometheus_username
-  grafana_cloud_loki_url            = var.grafana_cloud_loki_url
-  grafana_cloud_loki_username       = var.grafana_cloud_loki_username
-  grafana_cloud_api_key             = var.grafana_cloud_api_key
-  namespace                         = var.monitoring_namespace
-  alloy_chart_version               = var.alloy_chart_version
-  depends_on                        = [module.oke, terraform_data.grafana_monitoring_validation]
-}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Cloudflare Tunnel
