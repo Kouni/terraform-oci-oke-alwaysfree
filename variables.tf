@@ -48,7 +48,7 @@ variable "compartment_ocid" {
 variable "cluster_name" {
   description = "Display name for the OKE cluster"
   type        = string
-  default     = "alwaysfree-oke"
+  default     = "formosa"
 }
 
 variable "kubernetes_version" {
