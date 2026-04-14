@@ -33,11 +33,6 @@ output "n8n_namespace" {
   value       = kubernetes_namespace_v1.n8n.metadata[0].name
 }
 
-output "monitoring_namespace" {
-  description = "Kubernetes namespace where monitoring components are deployed (null if monitoring is disabled)"
-  value       = var.enable_alloy_to_grafana_cloud ? module.monitoring[0].namespace : null
-}
-
 output "n8n_setup_instructions" {
   description = "Required terraform.tfvars variables for enabling n8n and Cloudflare Tunnel"
   value       = <<-EOT
