@@ -151,8 +151,6 @@ resource "kubernetes_storage_class_v1" "oci_bv_xfs" {
   parameters = {
     "csi.storage.k8s.io/fstype" = "xfs"
   }
-
-  depends_on = [module.oke]
 }
 
 resource "helm_release" "nfs_server_provisioner" {
@@ -495,6 +493,16 @@ resource "kubernetes_deployment_v1" "cloudflared" {
               drop = ["ALL"]
             }
           }
+
+          volume_mount {
+            name       = "tmp"
+            mount_path = "/tmp"
+          }
+        }
+
+        volume {
+          name = "tmp"
+          empty_dir {}
         }
       }
     }
