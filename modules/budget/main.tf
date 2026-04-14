@@ -18,7 +18,7 @@ resource "oci_budget_alert_rule" "this" {
   threshold_type = "ABSOLUTE"
   recipients     = var.notification_email
   display_name   = "alert-at-${each.key}-usd"
-  description    = "Alert when actual spend reaches $${each.key}"
-  message        = "WARNING: Your OCI Always Free account has spent $${each.key}. Please check the OCI Console immediately."
+  description    = "Alert when actual spend reaches ${"$"}${each.key}"
+  message        = "WARNING: Your OCI Always Free account has spent ${"$"}${each.key}. Please check the OCI Console immediately."
   freeform_tags  = var.freeform_tags
 }
