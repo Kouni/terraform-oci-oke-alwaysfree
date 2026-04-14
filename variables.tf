@@ -150,6 +150,12 @@ variable "enable_metrics_server" {
   default     = true
 }
 
+variable "metrics_server_chart_version" {
+  description = "metrics-server Helm chart version. If null, uses the latest available version — pin a specific version for reproducible deployments"
+  type        = string
+  default     = null
+}
+
 # NFS Storage
 
 variable "enable_nfs_storage" {

@@ -119,7 +119,11 @@ resource "helm_release" "metrics_server" {
   name       = "metrics-server"
   repository = "https://kubernetes-sigs.github.io/metrics-server/"
   chart      = "metrics-server"
+  version    = var.metrics_server_chart_version
   namespace  = "kube-system"
+
+  timeout         = 600
+  cleanup_on_fail = true
 
   depends_on = [module.oke]
 }
@@ -159,6 +163,9 @@ resource "helm_release" "nfs_server_provisioner" {
   chart            = "${path.module}/charts"
   namespace        = "nfs-storage"
   create_namespace = true
+
+  timeout         = 900
+  cleanup_on_fail = true
 
   values = [yamlencode({
     persistence = {
@@ -236,8 +243,6 @@ resource "kubernetes_namespace_v1" "n8n" {
       "app.kubernetes.io/managed-by" = "terraform"
     }
   }
-
-  depends_on = [module.oke]
 }
 
 resource "kubernetes_namespace_v1" "tunnel" {
@@ -247,8 +252,6 @@ resource "kubernetes_namespace_v1" "tunnel" {
       "app.kubernetes.io/managed-by" = "terraform"
     }
   }
-
-  depends_on = [module.oke]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -285,7 +288,7 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
     ignore_changes = [spec]
   }
 
-  depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]
+  depends_on = [helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -353,6 +356,9 @@ resource "helm_release" "n8n" {
   namespace        = var.n8n_namespace
   create_namespace = false
 
+  timeout         = 600
+  cleanup_on_fail = true
+
   values = [yamlencode({
     image = {
       repository = "docker.n8n.io/n8nio/n8n"
@@ -405,7 +411,7 @@ resource "helm_release" "n8n" {
     pdb = { enabled = false }
   })]
 
-  depends_on = [module.oke, helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n, kubernetes_secret_v1.n8n_secrets, kubernetes_persistent_volume_claim_v1.n8n_data]
+  depends_on = [helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n, kubernetes_secret_v1.n8n_secrets, kubernetes_persistent_volume_claim_v1.n8n_data]
 
   lifecycle {
     precondition {
@@ -482,6 +488,7 @@ resource "kubernetes_deployment_v1" "cloudflared" {
 
           security_context {
             allow_privilege_escalation = false
+            read_only_root_filesystem  = true
             run_as_non_root            = true
             run_as_user                = 65532
             capabilities {
@@ -493,5 +500,5 @@ resource "kubernetes_deployment_v1" "cloudflared" {
     }
   }
 
-  depends_on = [terraform_data.always_free_validation, kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
+  depends_on = [kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
 }
