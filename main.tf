@@ -173,7 +173,7 @@ resource "helm_release" "nfs_server_provisioner" {
     }
     storageClass = {
       name         = "nfs"
-      defaultClass = false
+      defaultClass = true
     }
     extraArgs = {
       "enable-xfs-quota" = true
