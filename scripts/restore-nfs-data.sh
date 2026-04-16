@@ -2,17 +2,17 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # NFS PVC Restore Script
 #
-# 將 backup-nfs-data.sh 產生的備份還原到新建立的 NFS PVCs。
-# 在 NFS backing volume 遷移到 XFS 之後執行此腳本。
+# Restore backups created by backup-nfs-data.sh into newly created NFS PVCs.
+# Run this script after migrating the NFS backing volume to XFS.
 #
 # Usage: ./scripts/restore-nfs-data.sh <backup-dir>
-#   backup-dir  由 backup-nfs-data.sh 建立的備份目錄 (e.g. backups/nfs-202604131400)
+#   backup-dir  Backup directory created by backup-nfs-data.sh (e.g. backups/nfs-202604131400)
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 BACKUP_DIR="${1:-}"
 if [ -z "${BACKUP_DIR}" ] || [ ! -d "${BACKUP_DIR}" ]; then
-  echo "❌ Usage: $0 <backup-dir>"
+  echo "[ERROR] Usage: $0 <backup-dir>"
   echo "   Example: $0 backups/nfs-202604131400"
   exit 1
 fi
@@ -28,50 +28,50 @@ WORKLOADS_SCALED_DOWN=false
 scale_up() {
   [ "${WORKLOADS_SCALED_DOWN}" = "true" ] || return 0
   echo ""
-  echo "⬆️  Scaling workloads back up..."
-  kubectl scale deployment n8n-main -n n8n --replicas=1 2>/dev/null && echo "   ✅ n8n-main" || true
+  echo "[*]  Scaling workloads back up..."
+  kubectl scale deployment n8n-main -n n8n --replicas=1 2>/dev/null && echo "   [OK] n8n-main" || true
 }
 trap scale_up EXIT
 
 # ──────────────── Preflight ────────────────
-command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
-kubectl cluster-info >/dev/null 2>&1 || { echo "❌ Cannot reach cluster"; exit 1; }
+command -v kubectl >/dev/null 2>&1 || { echo "[ERROR] kubectl not found"; exit 1; }
+kubectl cluster-info >/dev/null 2>&1 || { echo "[ERROR] Cannot reach cluster"; exit 1; }
 
-echo "♻️  NFS PVC Restore"
+echo "[*]  NFS PVC Restore"
 echo "   Source: ${BACKUP_DIR}"
 echo ""
 
-echo "🔍 Verifying NFS provisioner is ready..."
+echo "[*] Verifying NFS provisioner is ready..."
 if ! kubectl get storageclass nfs >/dev/null 2>&1; then
-  echo "❌ StorageClass 'nfs' not found. Run 'terraform apply' first."
+  echo "[ERROR] StorageClass 'nfs' not found. Run 'terraform apply' first."
   exit 1
 fi
 NFS_POD=$(kubectl get pod -n nfs-storage -l app=nfs-server-provisioner \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 if [ -z "${NFS_POD}" ]; then
-  echo "❌ nfs-server-provisioner Pod not found. Run 'terraform apply' first."
+  echo "[ERROR] nfs-server-provisioner Pod not found. Run 'terraform apply' first."
   exit 1
 fi
-echo "   ✅ NFS provisioner: ${NFS_POD}"
+echo "   [OK] NFS provisioner: ${NFS_POD}"
 
 # ──────────────── Cleanup leftover temp pods from previous runs ────────────────
 echo ""
-echo "🧹 Cleaning up any leftover temp pods..."
+echo "[*] Cleaning up any leftover temp pods..."
 leftover=$(kubectl get pod -n n8n --no-headers 2>/dev/null \
   | awk '{print $1}' | grep -E "^nfs-rst-" || true)
 if [ -n "${leftover}" ]; then
   echo "${leftover}" | xargs kubectl delete pod -n n8n \
     --ignore-not-found=true --grace-period=0 --force 2>/dev/null || true
-  echo "   🗑️  Removed leftover pods in n8n"
+  echo "   [*]  Removed leftover pods in n8n"
 fi
 
 # ──────────────── Scale down workloads ────────────────
 echo ""
-echo "⬇️  Scaling down workloads before restore..."
-kubectl scale deployment n8n-main -n n8n --replicas=0 2>/dev/null && echo "   ✅ n8n-main" || echo "   ⚠️  n8n-main not found"
-echo "   ⏳ Waiting for pods to terminate..."
+echo "[*]  Scaling down workloads before restore..."
+kubectl scale deployment n8n-main -n n8n --replicas=0 2>/dev/null && echo "   [OK] n8n-main" || echo "   [!]  n8n-main not found"
+echo "   [*] Waiting for pods to terminate..."
 kubectl wait --for=delete pod -n n8n -l app.kubernetes.io/name=n8n --timeout=120s 2>/dev/null || true
-echo "   ✅ All workloads scaled down"
+echo "   [OK] All workloads scaled down"
 WORKLOADS_SCALED_DOWN=true
 
 # ──────────────── Helper: restore archive into a PVC via temp sleeping pod ────────────────
@@ -81,22 +81,22 @@ restore_pvc() {
   pod_name="nfs-rst-$(echo "${pvc_name}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | cut -c1-36)"
 
   if [ ! -f "${archive}" ]; then
-    echo "   ⚠️  Archive not found: ${archive}, skipping ${pvc_name}"
+    echo "   [!]  Archive not found: ${archive}, skipping ${pvc_name}"
     return 0
   fi
   if ! kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
-    echo "   ❌ PVC ${ns}/${pvc_name} not found — skipping (run 'terraform apply' first)"
+    echo "   [ERROR] PVC ${ns}/${pvc_name} not found — skipping (run 'terraform apply' first)"
     return 1
   fi
 
   # Clean up any leftover pod from a previous failed run
   if kubectl get pod "${pod_name}" -n "${ns}" >/dev/null 2>&1; then
-    echo "   🗑️  Removing leftover pod ${pod_name}..."
+    echo "   [*]  Removing leftover pod ${pod_name}..."
     kubectl delete pod "${pod_name}" -n "${ns}" --grace-period=0 --force 2>/dev/null || true
     kubectl wait --for=delete "pod/${pod_name}" -n "${ns}" --timeout=60s 2>/dev/null || true
   fi
 
-  echo "   ♻️  ${archive##*/} → ${ns}/${pvc_name}"
+  echo "   [*]  ${archive##*/} → ${ns}/${pvc_name}"
 
   kubectl run "${pod_name}" -n "${ns}" --restart=Never --rm=false \
     --image="${IMAGE}" \
@@ -114,29 +114,29 @@ restore_pvc() {
     }" >/dev/null 2>&1
 
   if ! kubectl wait pod "${pod_name}" -n "${ns}" --for=condition=Ready --timeout=120s >/dev/null 2>&1; then
-    echo "   ❌ Temp pod ${pod_name} failed to become Ready"
+    echo "   [ERROR] Temp pod ${pod_name} failed to become Ready"
     kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true --grace-period=0 --force >/dev/null 2>&1 || true
     return 1
   fi
 
   if ! kubectl exec -i -n "${ns}" "${pod_name}" -- \
       tar xzf - --directory="${mount_path}" < "${archive}"; then
-    echo "      ❌ tar failed for ${pvc_name}"
+    echo "      [ERROR] tar failed for ${pvc_name}"
     kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true >/dev/null 2>&1 || true
     return 1
   fi
 
-  echo "      ✅ Done"
+  echo "      [OK] Done"
   kubectl delete pod "${pod_name}" -n "${ns}" --ignore-not-found=true >/dev/null 2>&1 || true
 }
 
 # ──────────────── Ensure PVCs exist ────────────────
 echo ""
-echo "🔧 Ensuring PVCs exist..."
+echo "[*] Ensuring PVCs exist..."
 
 # ──────────────── Restore ────────────────
 echo ""
-echo "♻️  Restoring data..."
+echo "[*]  Restoring data..."
 restore_pvc "n8n" "n8n-data" "/home/node/.n8n" "${BACKUP_DIR}/n8n.tar.gz" || ERRORS=$((ERRORS+1))
 
 # ──────────────── Summary ────────────────
@@ -144,12 +144,12 @@ restore_pvc "n8n" "n8n-data" "/home/node/.n8n" "${BACKUP_DIR}/n8n.tar.gz" || ERR
 
 echo ""
 if [ "${ERRORS}" -gt 0 ]; then
-  echo "⚠️  Restore completed with ${ERRORS} error(s). Check output above."
+  echo "[!]  Restore completed with ${ERRORS} error(s). Check output above."
   exit 1
 else
-  echo "✅ Restore complete."
+  echo "[OK] Restore complete."
 fi
 echo ""
-echo "📋 Verify XFS quotas:"
+echo "[*] Verify XFS quotas:"
 echo "   NFS_POD=\$(kubectl get pod -n nfs-storage -l app=nfs-server-provisioner -o jsonpath='{.items[0].metadata.name}')"
 echo "   kubectl exec -n nfs-storage \"\${NFS_POD}\" -- xfs_quota -x -c 'report -h' /export"

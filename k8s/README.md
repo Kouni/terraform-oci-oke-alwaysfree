@@ -1,61 +1,61 @@
-# n8n on OKE Always Free — Cloudflare Zero Trust Tunnel 部署指南
+# n8n on OKE Always Free -- Cloudflare Zero Trust Tunnel Deployment Guide
 
-在 OCI Always Free OKE 叢集上部署 [n8n](https://n8n.io) 工作流自動化平台，透過 Cloudflare Zero Trust Tunnel 安全存取，**全程由 Terraform 管理**，不產生任何額外費用。
+Deploy [n8n](https://n8n.io) workflow automation platform on an OCI Always Free OKE cluster, securely accessed via Cloudflare Zero Trust Tunnel, **fully managed by Terraform**, at zero additional cost.
 
-> **Helm Chart**: n8n 官方 — `oci://ghcr.io/n8n-io/n8n-helm-chart/n8n`
+> **Helm Chart**: n8n official — `oci://ghcr.io/n8n-io/n8n-helm-chart/n8n`
 > **Source**: [github.com/n8n-io/n8n-hosting](https://github.com/n8n-io/n8n-hosting)
 
 ---
 
-<!-- ──────────────── 目錄 ──────────────── -->
+<!-- ──────────────── Table of Contents ──────────────── -->
 
-## 目錄
+## Table of Contents
 
-- [架構概覽](#架構概覽)
-- [先決條件](#先決條件)
-- [部署步驟](#部署步驟)
-  - [Step 1：建立 Cloudflare Tunnel](#step-1建立-cloudflare-tunnel)
-  - [Step 2：設定 terraform.tfvars](#step-2設定-terraformtfvars)
-  - [Step 3：執行 Terraform Apply](#step-3執行-terraform-apply)
-  - [Step 4：驗證部署](#step-4驗證部署)
-  - [Step 5：設定 Cloudflare Access 存取原則](#step-5設定-cloudflare-access-存取原則)
-- [部署後建議操作](#部署後建議操作)
-- [重要注意事項](#重要注意事項)
-- [疑難排解](#疑難排解)
-- [備份與還原](#備份與還原)
-- [解除安裝 / 清理](#解除安裝--清理)
+- [Architecture Overview](#architecture-overview)
+- [Prerequisites](#prerequisites)
+- [Deployment Steps](#deployment-steps)
+  - [Step 1: Create Cloudflare Tunnel](#step-1-create-cloudflare-tunnel)
+  - [Step 2: Configure terraform.tfvars](#step-2-configure-terraformtfvars)
+  - [Step 3: Run Terraform Apply](#step-3-run-terraform-apply)
+  - [Step 4: Verify Deployment](#step-4-verify-deployment)
+  - [Step 5: Configure Cloudflare Access Policy](#step-5-configure-cloudflare-access-policy)
+- [Post-Deployment Recommendations](#post-deployment-recommendations)
+- [Important Notes](#important-notes)
+- [Troubleshooting](#troubleshooting)
+- [Backup and Restore](#backup-and-restore)
+- [Uninstall / Cleanup](#uninstall--cleanup)
 
 ---
 
-<!-- ──────────────── 架構概覽 ──────────────── -->
+<!-- ──────────────── Architecture Overview ──────────────── -->
 
-## 架構概覽
+## Architecture Overview
 
-### 架構圖
+### Architecture Diagram
 
 ```mermaid
 graph TB
-    User["🌐 User Browser"]
-    CF["☁️ Cloudflare Edge<br/>(Zero Trust + Access)"]
+    User[" User Browser"]
+    CF[" Cloudflare Edge<br/>(Zero Trust + Access)"]
 
     User -->|HTTPS| CF
 
     subgraph VCN["OCI Always Free VCN (10.0.0.0/16)"]
         subgraph OKE["OKE Cluster — BASIC_CLUSTER, Flannel CNI<br/>Worker: VM.Standard.A1.Flex (ARM64)"]
 
-            subgraph NS_TUNNEL["🔷 Namespace: tunnel"]
+            subgraph NS_TUNNEL[" Namespace: tunnel"]
                 CFD["Deployment: cloudflared<br/><i>docker.io/cloudflare/cloudflared</i>"]
-                CF_SECRET[/"🔑 Secret: cloudflare-tunnel<br/>(TUNNEL_TOKEN)"/]
+                CF_SECRET[/"[*] Secret: cloudflare-tunnel<br/>(TUNNEL_TOKEN)"/]
             end
 
-            subgraph NS_N8N["🟢 Namespace: n8n"]
+            subgraph NS_N8N["[*] Namespace: n8n"]
                 SVC["Service: n8n-main<br/>ClusterIP :5678"]
                 N8N["Deployment: n8n-main<br/><i>(Helm: official n8n chart)</i><br/>n8nio/n8n — Standalone SQLite"]
-                N8N_SECRET[/"🔑 Secret: n8n-secrets<br/>N8N_ENCRYPTION_KEY<br/>N8N_HOST · PORT · PROTOCOL"/]
-                PVC[("💾 PVC (nfs)<br/>ReadWriteOnce<br/>/home/node/.n8n")]
+                N8N_SECRET[/"[*] Secret: n8n-secrets<br/>N8N_ENCRYPTION_KEY<br/>N8N_HOST · PORT · PROTOCOL"/]
+                PVC[("[*] PVC (nfs)<br/>ReadWriteOnce<br/>/home/node/.n8n")]
             end
 
-            subgraph NS_NFS["🟣 Namespace: nfs-storage"]
+            subgraph NS_NFS["Namespace: nfs-storage"]
                 NFS["nfs-server-provisioner<br/><i>OCI Block Volume</i><br/>(Always Free 200 GB shared)"]
             end
         end
@@ -88,382 +88,382 @@ graph TB
     style VCN fill:#263238,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5
 ```
 
-### 流量路徑
+### Traffic Path
 
 ```
-User ──HTTPS──▶ Cloudflare Public Hostname
-     ──Tunnel──▶ cloudflared Pod (outbound only, 無 inbound port)
-     ──HTTP────▶ n8n-main Service (ClusterIP, 叢集內部)
-     ──────────▶ n8n Pod (:5678)
+User ──HTTPS──> Cloudflare Public Hostname
+     ──Tunnel──> cloudflared Pod (outbound only, no inbound port)
+     ──HTTP────> n8n-main Service (ClusterIP, cluster internal)
+     ──────────> n8n Pod (:5678)
 ```
 
-### 資料路徑
+### Data Path
 
 ```
 n8n Pod ──mount──▶ NFS PVC ──▶ nfs-server-provisioner ──▶ OCI Block Volume
 ```
 
-### 架構決策
+### Architecture Decisions
 
-| 決策 | 選擇 | 原因 |
-|------|------|------|
-| **Ingress 方式** | Cloudflare Tunnel（非 OCI LB） | OCI LB 非 Always Free；ClusterIP + cloudflared 零成本且等效安全 |
-| **Helm Chart** | n8n 官方 chart | 官方團隊維護，原生支援 Standalone mode |
-| **運行模式** | Standalone（SQLite） | 不需外部 PostgreSQL/Redis，適合 Always Free 單節點 |
-| **cloudflared 部署** | 獨立 Deployment（`tunnel` namespace） | 共享 Tunnel 服務，可供叢集內任何服務使用；官方 chart 不支援 `extraContainers` |
-| **持久化** | NFS StorageClass | 使用既有 nfs-server-provisioner，資料儲存於 OCI Block Volume |
-| **Secrets 管理** | Terraform 管理（`kubernetes_secret_v1` in root `main.tf`）; 進 Terraform state，但標記為 sensitive | Terraform 一站式管理所有資源；sensitive 標記防止敏感值出現在 plan 輸出 |
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Ingress Method** | Cloudflare Tunnel (not OCI LB) | OCI LB is not Always Free; ClusterIP + cloudflared achieves zero cost with equivalent security |
+| **Helm Chart** | n8n official chart | Maintained by the official team; natively supports Standalone mode |
+| **Execution Mode** | Standalone (SQLite) | No external PostgreSQL/Redis required; suitable for Always Free single-node |
+| **cloudflared Deployment** | Separate Deployment (`tunnel` namespace) | Shared Tunnel service usable by any in-cluster service; official chart does not support `extraContainers` |
+| **Persistence** | NFS StorageClass | Uses the existing nfs-server-provisioner; data stored on OCI Block Volume |
+| **Secrets Management** | Terraform-managed (`kubernetes_secret_v1` in root `main.tf`); stored in Terraform state but marked as sensitive | Single-pane Terraform management of all resources; sensitive marking prevents values from appearing in plan output |
 
-### 雙層認證架構
+### Dual-Layer Authentication Architecture
 
-n8n 採用兩層認證以確保安全：
+n8n employs two layers of authentication for security:
 
-1. **Cloudflare Access（網路閘道層）** — 在流量到達叢集前進行身份驗證（如限制 `@your-domain.com` 信箱）
-2. **n8n 內建認證（應用層）** — n8n 首次啟動時會建立 owner 帳號，所有使用者都需登入
+1. **Cloudflare Access (network gateway layer)** -- Authenticates traffic before it reaches the cluster (e.g. restricting to `@your-domain.com` emails)
+2. **n8n built-in authentication (application layer)** -- n8n creates an owner account on first launch; all users must log in
 
 ---
 
-<!-- ──────────────── 先決條件 ──────────────── -->
+<!-- ──────────────── Prerequisites ──────────────── -->
 
-## 先決條件
+## Prerequisites
 
-| 項目 | 說明 |
-|------|------|
-| **Terraform** | >= 1.5.0，已安裝 OCI、Helm、Kubernetes provider |
-| **OCI CLI** | 已安裝並設定好 config profile（Helm/Kubernetes provider 認證需要） |
-| **kubectl** | 已設定好連線至 OKE 叢集（`oci ce cluster create-kubeconfig ...`） |
-| **Cloudflare 帳號** | 擁有一個已加入 Cloudflare 的網域（Free plan 即可） |
-| **NFS Storage** | `enable_nfs_storage = true` 已套用（n8n 需要 NFS StorageClass） |
+| Item | Description |
+|------|-------------|
+| **Terraform** | >= 1.5.0, with OCI, Helm, and Kubernetes providers installed |
+| **OCI CLI** | Installed and configured with a config profile (required for Helm/Kubernetes provider auth) |
+| **kubectl** | Configured to connect to the OKE cluster (`oci ce cluster create-kubeconfig ...`) |
+| **Cloudflare Account** | Owns a domain added to Cloudflare (Free plan is sufficient) |
+| **NFS Storage** | `enable_nfs_storage = true` has been applied (n8n requires the NFS StorageClass) |
 
-驗證叢集連線：
+Verify cluster connectivity:
 
 ```bash
 kubectl get nodes
-# 應顯示 ARM64 worker node，STATUS 為 Ready
+# Should show an ARM64 worker node with STATUS Ready
 ```
 
 ---
 
-<!-- ──────────────── 部署步驟 ──────────────── -->
+<!-- ──────────────── Deployment Steps ──────────────── -->
 
-## 部署步驟
+## Deployment Steps
 
-### Step 1：建立 Cloudflare Tunnel
+### Step 1: Create Cloudflare Tunnel
 
-1. 前往 [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com)
-2. 進入 **Networks → Tunnels → Create a tunnel**
-3. 選擇 **Cloudflared** connector
-4. 輸入 tunnel 名稱（例如 `n8n-oke`）
-5. **跳過** Install connector 頁面（我們會透過 Kubernetes 部署 cloudflared）
-6. 複製 **Tunnel Token**（後續步驟會用到）
-7. 新增 **Public Hostname**：
+1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com)
+2. Navigate to **Networks -> Tunnels -> Create a tunnel**
+3. Select **Cloudflared** connector
+4. Enter a tunnel name (e.g. `n8n-oke`)
+5. **Skip** the Install connector page (we will deploy cloudflared via Kubernetes)
+6. Copy the **Tunnel Token** (needed in later steps)
+7. Add a **Public Hostname**:
 
-   | 欄位 | 值 | 說明 |
-   |------|----|------|
-   | Subdomain | `n8n` | 你想要的子網域 |
-   | Domain | `your-domain.com` | 你的 Cloudflare 網域 |
-   | Type | `HTTP` | n8n 內部走 HTTP |
-   | URL | `n8n-main.n8n.svc.cluster.local:5678` | 跨 namespace 完整 FQDN |
+   | Field | Value | Description |
+   |-------|-------|-------------|
+   | Subdomain | `n8n` | Your desired subdomain |
+   | Domain | `your-domain.com` | Your Cloudflare domain |
+   | Type | `HTTP` | n8n uses HTTP internally |
+   | URL | `n8n-main.n8n.svc.cluster.local:5678` | Cross-namespace fully qualified FQDN |
 
-   > ⚠️ Service URL 必須設定為 `n8n-main.n8n.svc.cluster.local:5678`。
-   > 因為 cloudflared 位於 `tunnel` namespace，必須使用完整 FQDN 來存取 `n8n` namespace 中的 Service。
+   > [!] The Service URL must be set to `n8n-main.n8n.svc.cluster.local:5678`.
+   > Since cloudflared is in the `tunnel` namespace, the full FQDN is required to access the Service in the `n8n` namespace.
 
-8. 儲存設定
+8. Save the configuration
 
 ---
 
-### Step 2：設定 terraform.tfvars
+### Step 2: Configure terraform.tfvars
 
-編輯 `terraform.tfvars`，填入以下變數：
+Edit `terraform.tfvars` and fill in the following variables:
 
 ```hcl
 enable_cloudflare_tunnel = true
-cloudflare_tunnel_token  = "<從 Cloudflare Dashboard 複製的 Tunnel Token>"
+cloudflare_tunnel_token  = "<Tunnel Token copied from the Cloudflare Dashboard>"
 
 enable_n8n               = true
 n8n_host                 = "n8n.your-domain.com"
 n8n_encryption_key       = "<openssl rand -hex 32>"
 ```
 
-生成 encryption key：
+Generate an encryption key:
 
 ```bash
 openssl rand -hex 32
 ```
 
-> ⚠️ **務必將 `n8n_encryption_key` 備份到安全的地方！** 此金鑰一旦遺失，所有已儲存在 n8n 中的第三方憑證（如 API key、OAuth token）將無法解密。
+> [!] **Be sure to back up `n8n_encryption_key` to a safe location!** If this key is lost, all third-party credentials stored in n8n (such as API keys, OAuth tokens) cannot be decrypted.
 
-可用變數一覽：
+Available variables:
 
-| 變數 | 類型 | 預設值 | 說明 |
-|------|------|--------|------|
-| `enable_n8n` | bool | `false` | 是否部署 n8n（需同時啟用 cloudflare_tunnel） |
-| `n8n_host` | string | — | n8n 對外 hostname（需與 Cloudflare Public Hostname 一致） |
-| `n8n_encryption_key` | string | — | n8n 加密金鑰（見上方生成方式） |
-| `n8n_pvc_size` | string | `"5Gi"` | NFS PVC 大小（SQLite DB + workflows） |
-| `n8n_chart_version` | string | `null` | Helm chart 版本（null = latest） |
-| `enable_cloudflare_tunnel` | bool | `false` | 是否部署共享 Cloudflare Tunnel |
-| `cloudflare_tunnel_token` | string | — | Cloudflare Tunnel Token |
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `enable_n8n` | bool | `false` | Whether to deploy n8n (requires cloudflare_tunnel to also be enabled) |
+| `n8n_host` | string | -- | n8n external hostname (must match the Cloudflare Public Hostname) |
+| `n8n_encryption_key` | string | -- | n8n encryption key (see generation method above) |
+| `n8n_pvc_size` | string | `"5Gi"` | NFS PVC size (SQLite DB + workflows) |
+| `n8n_chart_version` | string | `null` | Helm chart version (null = latest) |
+| `enable_cloudflare_tunnel` | bool | `false` | Whether to deploy the shared Cloudflare Tunnel |
+| `cloudflare_tunnel_token` | string | -- | Cloudflare Tunnel Token |
 
 ---
 
-### Step 3：執行 Terraform Apply
+### Step 3: Run Terraform Apply
 
 ```bash
-# 預覽變更
+# Preview changes
 terraform plan
 
-# 套用變更
+# Apply changes
 terraform apply
 ```
 
-Terraform 會建立以下資源：
+Terraform will create the following resources:
 
-- `kubernetes_namespace_v1.n8n` — n8n namespace
-- `kubernetes_namespace_v1.tunnel` — tunnel namespace
-- `kubernetes_secret_v1.n8n_secrets` — n8n 核心設定 Secret
-- `kubernetes_secret_v1.cloudflare_tunnel_secret` — Cloudflare Tunnel token Secret
-- `kubernetes_persistent_volume_claim_v1.n8n_data` — NFS PVC（名稱：`n8n-data`）
-- `helm_release.n8n[0]` — n8n Helm release（Standalone mode, SQLite）
-- `kubernetes_deployment_v1.cloudflared[0]` — cloudflared Tunnel Deployment
+- `kubernetes_namespace_v1.n8n` -- n8n namespace
+- `kubernetes_namespace_v1.tunnel` -- tunnel namespace
+- `kubernetes_secret_v1.n8n_secrets` -- n8n core configuration Secret
+- `kubernetes_secret_v1.cloudflare_tunnel_secret` -- Cloudflare Tunnel token Secret
+- `kubernetes_persistent_volume_claim_v1.n8n_data` -- NFS PVC (name: `n8n-data`)
+- `helm_release.n8n[0]` -- n8n Helm release (Standalone mode, SQLite)
+- `kubernetes_deployment_v1.cloudflared[0]` -- cloudflared Tunnel Deployment
 
-> 💡 `n8n` 和 `tunnel` namespace、PVC 無論 `enable_n8n` / `enable_cloudflare_tunnel` 是否啟用，都會常態建立。
+> NOTE: The `n8n` and `tunnel` namespaces and the PVC are always created regardless of whether `enable_n8n` / `enable_cloudflare_tunnel` is enabled.
 
 ---
 
-### Step 4：驗證部署
+### Step 4: Verify Deployment
 
 ```bash
-# 確認 n8n Pod 狀態
+# Check n8n Pod status
 kubectl get pods -n n8n
-# 預期輸出：
+# Expected output:
 #   NAME                          READY   STATUS    RESTARTS   AGE
 #   n8n-main-xxxxxxxxxx-xxxxx     1/1     Running   0          2m
 
-# 確認 cloudflared Pod 狀態（在 tunnel namespace）
+# Check cloudflared Pod status (in tunnel namespace)
 kubectl get pods -n tunnel
-# 預期輸出：
+# Expected output:
 #   NAME                           READY   STATUS    RESTARTS   AGE
 #   cloudflared-xxxxxxxxxx-xxxxx   1/1     Running   0          2m
 
-# 確認 PVC 已 Bound
+# Confirm PVC is Bound
 kubectl get pvc -n n8n
 
-# 查看 n8n 日誌（確認啟動成功）
+# View n8n logs (confirm successful startup)
 kubectl logs -n n8n deployment/n8n-main
 
-# 查看 cloudflared 連線狀態（應顯示 tunnel 已連線）
+# View cloudflared connection status (should show tunnel is connected)
 kubectl logs -n tunnel deployment/cloudflared
 
-# 確認 Service 已建立
+# Confirm Service is created
 kubectl get svc -n n8n
-# 預期輸出：
+# Expected output:
 #   NAME       TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
 #   n8n-main   ClusterIP   10.96.xxx.xxx   <none>        5678/TCP   2m
 ```
 
-開啟瀏覽器，前往你在 Step 1 設定的 Public Hostname：
+Open a browser and navigate to the Public Hostname configured in Step 1:
 
 ```
 https://n8n.your-domain.com
 ```
 
-首次存取時，n8n 會要求你建立 **owner 帳號**（設定 email 和密碼）。此帳號即為管理員。
+On first access, n8n will prompt you to create an **owner account** (set email and password). This account becomes the administrator.
 
-> 💡 Cloudflare 自動處理 HTTPS/TLS 終止。n8n 內部通訊使用 HTTP，不需額外設定憑證。
+> NOTE: Cloudflare automatically handles HTTPS/TLS termination. n8n internal communication uses HTTP; no additional certificate configuration is needed.
 
 ---
 
-### Step 5：設定 Cloudflare Access 存取原則
+### Step 5: Configure Cloudflare Access Policy
 
-建議在 n8n 內建認證之外，再加上 Cloudflare Access 作為第一道防線：
+It is recommended to add Cloudflare Access as a first line of defense in addition to n8n's built-in authentication:
 
-1. 前往 [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com)
-2. 進入 **Access → Applications → Add an application**
-3. 選擇 **Self-hosted**
-4. 設定 Application：
+1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com)
+2. Navigate to **Access -> Applications -> Add an application**
+3. Select **Self-hosted**
+4. Configure the Application:
 
-   | 欄位 | 值 |
-   |------|----|
+   | Field | Value |
+   |-------|-------|
    | Application name | `n8n` |
    | Application domain | `n8n.your-domain.com` |
 
-5. 新增 **Policy**：
+5. Add a **Policy**:
 
-   | 欄位 | 值 |
-   |------|----|
+   | Field | Value |
+   |-------|-------|
    | Policy name | `Allow organization email` |
    | Action | `Allow` |
    | Include rule | Emails ending in `@your-domain.com` |
 
-   > 範例：若你的組織 email 為 `@lcse.org`，設定 "Emails ending in" = `@lcse.org`。
-   > 這樣只有該網域信箱通過 OTP 驗證後才能存取 n8n。
+   > Example: If your organization email domain is `@lcse.org`, set "Emails ending in" = `@lcse.org`.
+   > This way, only users with that email domain who pass OTP verification can access n8n.
 
-6. 儲存設定
+6. Save the configuration
 
-**認證流程（使用者視角）：**
+**Authentication flow (user perspective):**
 
 ```
-使用者存取 https://n8n.your-domain.com
-    → Cloudflare Access 攔截：輸入 email → 收到 OTP 驗證碼 → 驗證通過
-    → 進入 n8n 登入頁面：輸入 n8n 帳號密碼
-    → 成功進入 n8n 工作區
+User accesses https://n8n.your-domain.com
+    -> Cloudflare Access intercepts: enter email -> receive OTP code -> verification passes
+    -> Enter n8n login page: enter n8n account credentials
+    -> Successfully access n8n workspace
 ```
 
 ---
 
-<!-- ──────────────── 部署後建議操作 ──────────────── -->
+<!-- ──────────────── Post-Deployment Recommendations ──────────────── -->
 
-## 部署後建議操作
+## Post-Deployment Recommendations
 
-### 將 PV Reclaim Policy 改為 Retain
+### Change PV Reclaim Policy to Retain
 
-預設的 reclaim policy 為 `Delete`，當 PVC 被刪除時，PV 和資料也會一同刪除。建議改為 `Retain`：
+The default reclaim policy is `Delete`, meaning when a PVC is deleted, the PV and its data are also deleted. It is recommended to change it to `Retain`:
 
 ```bash
-# 查看 n8n PVC 對應的 PV 名稱
+# Find the PV name corresponding to the n8n PVC
 PV_NAME=$(kubectl get pvc -n n8n -o jsonpath='{.items[0].spec.volumeName}')
 
-# 將 reclaim policy 改為 Retain
+# Change the reclaim policy to Retain
 kubectl patch pv "$PV_NAME" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
 
-# 驗證
+# Verify
 kubectl get pv "$PV_NAME" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'
-# 應顯示: Retain
+# Should show: Retain
 ```
 
 ---
 
-<!-- ──────────────── 重要注意事項 ──────────────── -->
+<!-- ──────────────── Important Notes ──────────────── -->
 
-## 重要注意事項
+## Important Notes
 
-### N8N_ENCRYPTION_KEY 備份
+### N8N_ENCRYPTION_KEY Backup
 
-`n8n_encryption_key`（`terraform.tfvars` 中設定）是 n8n 用來加密所有儲存的第三方憑證的金鑰。**請務必妥善備份**，遺失後所有已儲存的 API key、OAuth token 等均無法解密。
+`n8n_encryption_key` (configured in `terraform.tfvars`) is the key n8n uses to encrypt all stored third-party credentials. **Be sure to back it up securely**; if lost, all stored API keys, OAuth tokens, etc. cannot be decrypted.
 
-### NFS 持久化儲存
+### NFS Persistent Storage
 
-- n8n 資料（SQLite DB、workflows、credentials）儲存於 NFS PVC，掛載路徑為 `/home/node/.n8n`
-- NFS 由 `nfs-server-provisioner`（namespace: `nfs-storage`）提供，底層使用 OCI Block Volume
-- 建議部署後立即將 PV reclaim policy 改為 `Retain`（見上方步驟）
+- n8n data (SQLite DB, workflows, credentials) is stored on an NFS PVC, mounted at `/home/node/.n8n`
+- NFS is provided by `nfs-server-provisioner` (namespace: `nfs-storage`), backed by OCI Block Volume
+- It is recommended to change the PV reclaim policy to `Retain` immediately after deployment (see steps above)
 
-### n8n PVC 為永久資源
+### n8n PVC Is a Permanent Resource
 
-n8n PVC（`n8n-data`）是永久資源 — 即使 `enable_n8n = false` 也不會被刪除，保護存儲資料。如需完全移除，請參閱[解除安裝 / 清理](#解除安裝--清理)。
+The n8n PVC (`n8n-data`) is a permanent resource -- it will not be deleted even when `enable_n8n = false`, protecting stored data. For complete removal, see [Uninstall / Cleanup](#uninstall--cleanup).
 
-### Always Free 資源限制
+### Always Free Resource Limits
 
-n8n + cloudflared **不額外消耗** OCI Always Free 基礎設施配額（使用既有節點的 CPU/RAM）：
+n8n + cloudflared **do not consume additional** OCI Always Free infrastructure quota (they use the existing node's CPU/RAM):
 
-| 資源 | n8n 用量 | cloudflared 用量 | Always Free 限制 |
-|------|---------|-----------------|-----------------|
-| CPU | 100m–500m | 10m–100m | 4 OCPU total |
-| RAM | 256Mi–512Mi | 32Mi–128Mi | 24 GB total |
-| Block Volume | +0（NFS PVC） | +0 | 200 GB shared |
-| Load Balancer | 0（ClusterIP） | 0 | 不適用 |
+| Resource | n8n Usage | cloudflared Usage | Always Free Limit |
+|----------|-----------|-------------------|-------------------|
+| CPU | 100m-500m | 10m-100m | 4 OCPU total |
+| RAM | 256Mi-512Mi | 32Mi-128Mi | 24 GB total |
+| Block Volume | +0 (NFS PVC) | +0 | 200 GB shared |
+| Load Balancer | 0 (ClusterIP) | 0 | N/A |
 
-### Secrets 進入 Terraform State（標記為 sensitive）
+### Secrets in Terraform State (Marked as Sensitive)
 
-Kubernetes Secrets 由 Terraform `kubernetes_secret_v1` 資源管理，**會進入 `terraform.tfstate`**，但所有敏感欄位均標記為 `sensitive`，不會出現在 `terraform plan`/`apply` 的輸出中。請妥善保管 state 檔案，或使用遠端 backend（如 OCI Object Storage）。
+Kubernetes Secrets are managed by Terraform `kubernetes_secret_v1` resources and **are stored in `terraform.tfstate`**, but all sensitive fields are marked as `sensitive` and will not appear in `terraform plan`/`apply` output. Safeguard the state file, or use a remote backend (e.g. OCI Object Storage).
 
-### Cloudflare 處理 TLS
+### Cloudflare Handles TLS
 
-- Cloudflare Edge 終止 HTTPS，叢集內部通訊使用 HTTP
-- `N8N_PROTOCOL` 設為 `http`，無需在 n8n 端設定 TLS 憑證
-- cloudflared 僅建立 **outbound** 連線（HTTPS port 443），不開啟任何 inbound port
+- Cloudflare Edge terminates HTTPS; in-cluster communication uses HTTP
+- `N8N_PROTOCOL` is set to `http`; no TLS certificate configuration is needed on the n8n side
+- cloudflared establishes **outbound-only** connections (HTTPS port 443); no inbound ports are opened
 
 ---
 
-<!-- ──────────────── 疑難排解 ──────────────── -->
+<!-- ──────────────── Troubleshooting ──────────────── -->
 
-## 疑難排解
+## Troubleshooting
 
-### Pod 狀態為 ImagePullBackOff
+### Pod Status: ImagePullBackOff
 
-**問題**：OKE 使用 CRI-O 作為 container runtime，CRI-O **不會**自動加上 `docker.io/` 前綴。
+**Problem**: OKE uses CRI-O as its container runtime. CRI-O **does not** automatically prepend `docker.io/`.
 
-**解法**：確認 image 名稱使用完整的 registry 路徑（fully qualified image name）。本專案已在 Terraform 中正確設定：
+**Solution**: Ensure image names use fully qualified registry paths (fully qualified image names). This project already has the correct configuration in Terraform:
 
-| 元件 | 正確 image 名稱 |
-|------|-----------------|
+| Component | Correct Image Name |
+|-----------|--------------------|
 | n8n | `docker.n8n.io/n8nio/n8n:latest` |
 | cloudflared | `docker.io/cloudflare/cloudflared:latest` |
 
-如果你自行部署其他 image，請確保加上 `docker.io/` 前綴：
+If you deploy other images yourself, ensure you add the `docker.io/` prefix:
 
 ```yaml
-# ❌ 錯誤（CRI-O 無法解析）
+# [ERROR] Incorrect (CRI-O cannot resolve)
 image: nginx:latest
 
-# ✅ 正確
+# [OK] Correct
 image: docker.io/nginx:latest
 ```
 
 ### cloudflared Pod CrashLoopBackOff
 
-**可能原因**：
+**Possible causes**:
 
-1. **TUNNEL_TOKEN 不正確** — 確認 `terraform.tfvars` 中的 `cloudflare_tunnel_token` 與 Cloudflare Dashboard 一致
-2. **Tunnel 已被刪除** — 至 Cloudflare Dashboard 確認 tunnel 仍然存在
+1. **TUNNEL_TOKEN is incorrect** -- Verify `cloudflare_tunnel_token` in `terraform.tfvars` matches the Cloudflare Dashboard
+2. **Tunnel has been deleted** -- Check the Cloudflare Dashboard to confirm the tunnel still exists
 
 ```bash
-# 查看 cloudflared 日誌
+# View cloudflared logs
 kubectl logs -n tunnel deployment/cloudflared
 
-# 確認 secret 內容存在
+# Verify the secret content exists
 kubectl get secret cloudflare-tunnel -n tunnel -o jsonpath='{.data.TUNNEL_TOKEN}' | base64 -d
 ```
 
-### n8n Pod 無法啟動（Pending 狀態）
+### n8n Pod Cannot Start (Pending Status)
 
-**可能原因**：
+**Possible causes**:
 
-1. **PVC 未 Bound** — NFS StorageClass 尚未就緒
+1. **PVC not Bound** -- NFS StorageClass is not yet ready
 
    ```bash
-   # 檢查 PVC 狀態
+   # Check PVC status
    kubectl get pvc -n n8n
 
-   # 檢查 nfs-server-provisioner 是否運行中
+   # Check if nfs-server-provisioner is running
    kubectl get pods -n nfs-storage
    ```
 
-2. **NFS storage 未啟用** — 確認 `enable_nfs_storage = true` 已套用
+2. **NFS storage not enabled** -- Confirm `enable_nfs_storage = true` has been applied
 
-3. **Secret 不存在** — 確認 Terraform apply 已完成且無錯誤
+3. **Secret does not exist** -- Confirm Terraform apply completed without errors
 
    ```bash
    kubectl get secrets -n n8n
    ```
 
-### Cloudflare Access OTP 驗證信未收到
+### Cloudflare Access OTP Verification Email Not Received
 
-**可能原因**：
+**Possible causes**:
 
-1. **Email 被歸類為垃圾郵件** — 檢查垃圾郵件匣
-2. **Email 網域不在允許列表** — 確認 Access Policy 中 "Emails ending in" 設定正確
-3. **DNS 尚未生效** — 新建立的 Public Hostname 可能需要幾分鐘生效
+1. **Email classified as spam** -- Check the spam folder
+2. **Email domain not in the allow list** -- Verify the "Emails ending in" setting in the Access Policy is correct
+3. **DNS not yet propagated** -- Newly created Public Hostnames may take a few minutes to take effect
 
-### n8n 顯示 502 Bad Gateway
+### n8n Shows 502 Bad Gateway
 
-**可能原因**：n8n Pod 尚未完成啟動，或 Service endpoint 不正確
+**Possible cause**: n8n Pod has not finished starting, or the Service endpoint is incorrect
 
 ```bash
-# 確認 n8n Pod 已 Running
+# Confirm n8n Pod is Running
 kubectl get pods -n n8n -l app.kubernetes.io/name=n8n
 
-# 確認 Service endpoint
+# Verify Service endpoint
 kubectl get endpoints -n n8n n8n-main
 
-# 測試叢集內連線
+# Test in-cluster connectivity
 kubectl run test-curl --rm -it --image=docker.io/curlimages/curl:latest -n n8n -- \
   curl -s http://n8n-main:5678/healthz
 ```
 
-### Terraform apply 報錯：enable_nfs_storage must be true
+### Terraform Apply Error: enable_nfs_storage must be true
 
-n8n 依賴 NFS StorageClass 作為持久化儲存，請確認在 `terraform.tfvars` 中同時啟用：
+n8n depends on the NFS StorageClass for persistent storage. Ensure both are enabled in `terraform.tfvars`:
 
 ```hcl
 enable_nfs_storage = true
@@ -472,99 +472,99 @@ enable_n8n         = true
 
 ---
 
-<!-- ──────────────── 備份與還原 ──────────────── -->
+<!-- ──────────────── Backup and Restore ──────────────── -->
 
-## 備份與還原
+## Backup and Restore
 
-### 備份
+### Backup
 
-專案根目錄提供 `backup-n8n.sh` 腳本，一鍵備份所有 n8n 關鍵資料：
+The project root directory provides a `backup-n8n.sh` script for one-command backup of all critical n8n data:
 
 ```bash
-# 使用預設 namespace（n8n + tunnel）
+# Use default namespaces (n8n + tunnel)
 ./backup-n8n.sh
 
-# 自訂 namespace
+# Custom namespaces
 ./backup-n8n.sh <n8n_namespace> <tunnel_namespace>
 ```
 
-備份內容：
+Backup contents:
 
-| 檔案 | 說明 |
-|------|------|
-| `database.sqlite` | n8n 完整資料（workflows、credentials、執行記錄、使用者帳號） |
-| `n8n-secrets.yaml` | K8s Secret YAML（N8N_ENCRYPTION_KEY 等） |
+| File | Description |
+|------|-------------|
+| `database.sqlite` | Complete n8n data (workflows, credentials, execution history, user accounts) |
+| `n8n-secrets.yaml` | K8s Secret YAML (N8N_ENCRYPTION_KEY, etc.) |
 | `cloudflare-tunnel.yaml` | Cloudflare Tunnel token YAML |
-| `plaintext-keys.txt` | 明文金鑰（方便存入密碼管理器） |
-| `helm-values.yaml` | n8n Helm release 設定值 |
+| `plaintext-keys.txt` | Plaintext keys (for storing in a password manager) |
+| `helm-values.yaml` | n8n Helm release configuration values |
 
-備份存放於 `backups/YYYYMMDDHHMM/`，最多保留 **7 份**，超過自動輪替刪除最舊的。
+Backups are stored in `backups/YYYYMMDDHHMM/`, with a maximum of **7 copies** retained; the oldest is automatically rotated out when exceeded.
 
-> ⚠️ `backups/` 已被 `.gitignore` 排除，不會進入版控。
+> [!] `backups/` is excluded by `.gitignore` and will not be committed to version control.
 
-### 還原
+### Restore
 
-如果需要還原 n8n 資料：
+To restore n8n data:
 
 ```bash
-# 1. 還原 SQLite 資料庫
+# 1. Restore the SQLite database
 N8N_POD=$(kubectl get pod -n n8n -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].metadata.name}')
 kubectl cp backups/<YYYYMMDDHHMM>/database.sqlite n8n/${N8N_POD}:/home/node/.n8n/database.sqlite
 
-# 2. 重啟 n8n 讓它讀取還原的資料庫
+# 2. Restart n8n to read the restored database
 kubectl rollout restart deployment/n8n-main -n n8n
 ```
 
-> 💡 Secrets（加密金鑰、Tunnel Token）由 Terraform 管理。若需更新金鑰，修改 `terraform.tfvars` 再執行 `terraform apply`。
+> NOTE: Secrets (encryption key, Tunnel Token) are managed by Terraform. To update keys, modify `terraform.tfvars` and run `terraform apply`.
 
-### 重要備份事項
+### Important Backup Notes
 
-- **`n8n_encryption_key` 是最關鍵的備份項目**：遺失後所有已儲存的第三方憑證將無法解密
-- 建議首次部署後立即執行 `./backup-n8n.sh`，並將 `plaintext-keys.txt` 中的金鑰存入密碼管理器
-- 備份前腳本會自動執行 `PRAGMA wal_checkpoint(TRUNCATE)` 確保 SQLite 資料一致性
+- **`n8n_encryption_key` is the most critical item to back up**: if lost, all stored third-party credentials cannot be decrypted
+- It is recommended to run `./backup-n8n.sh` immediately after first deployment, and store the keys from `plaintext-keys.txt` in a password manager
+- Before backing up, the script automatically runs `PRAGMA wal_checkpoint(TRUNCATE)` to ensure SQLite data consistency
 
 ---
 
-<!-- ──────────────── 解除安裝 / 清理 ──────────────── -->
+<!-- ──────────────── Uninstall / Cleanup ──────────────── -->
 
-## 解除安裝 / 清理
+## Uninstall / Cleanup
 
-### 方式一：停用 n8n 和 Cloudflare Tunnel（保留 namespace 和 PVC）
+### Option 1: Disable n8n and Cloudflare Tunnel (preserve namespaces and PVCs)
 
-修改 `terraform.tfvars`：
+Edit `terraform.tfvars`:
 
 ```hcl
 enable_n8n               = false
 enable_cloudflare_tunnel = false
 ```
 
-執行 Terraform：
+Run Terraform:
 
 ```bash
 terraform apply
 ```
 
-這會移除 `helm_release.n8n`、`kubernetes_deployment_v1.cloudflared`、以及相關 Secrets。**Namespace（`n8n`、`tunnel`）和 PVC（`n8n-data`）保留**，資料不會遺失。
+This will remove `helm_release.n8n`, `kubernetes_deployment_v1.cloudflared`, and related Secrets. **Namespaces (`n8n`, `tunnel`) and the PVC (`n8n-data`) are preserved**; no data is lost.
 
-### 方式二：完全移除（包含 namespace 和 PVC）
+### Option 2: Complete Removal (including namespaces and PVCs)
 
-Namespace 和 PVC 是永久資源，`terraform destroy` 不會刪除它們。需手動移出 state 後再刪除：
+Namespaces and PVCs are permanent resources; `terraform destroy` will not delete them. They must be manually removed from state before deletion:
 
 ```bash
-# 1. 先停用應用層（見方式一）
+# 1. First disable the application layer (see Option 1)
 terraform apply -var="enable_n8n=false" -var="enable_cloudflare_tunnel=false"
 
-# 2. 移出 Terraform state
+# 2. Remove from Terraform state
 terraform state rm kubernetes_namespace_v1.n8n
 terraform state rm kubernetes_namespace_v1.tunnel
 terraform state rm kubernetes_persistent_volume_claim_v1.n8n_data
 
-# 3. 手動刪除 Kubernetes 資源
+# 3. Manually delete Kubernetes resources
 kubectl delete ns n8n tunnel
 ```
 
-> ⚠️ 刪除 namespace 會連同 PVC 一起刪除，永久移除 n8n 所有資料（workflows、credentials、SQLite DB）。請先執行備份。
+> [!] Deleting the namespace will also delete the PVC, permanently removing all n8n data (workflows, credentials, SQLite DB). Run a backup first.
 
-（可選）移除 Cloudflare Tunnel：
-- 前往 Cloudflare Zero Trust Dashboard → Networks → Tunnels
-- 刪除對應的 tunnel
+(Optional) Remove the Cloudflare Tunnel:
+- Go to Cloudflare Zero Trust Dashboard -> Networks -> Tunnels
+- Delete the corresponding tunnel
