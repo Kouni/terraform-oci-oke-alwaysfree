@@ -6,9 +6,9 @@ Terraform module to deploy an OKE (Oracle Kubernetes Engine) cluster using only 
 
 ```mermaid
 graph TB
-    CF["☁️ Cloudflare Edge<br/>(Zero Trust Tunnel)"]
+    CF["Cloudflare Edge<br/>(Zero Trust Tunnel)"]
 
-    subgraph VCN["🌐 VCN 10.0.0.0/16"]
+    subgraph VCN["VCN 10.0.0.0/16"]
         subgraph SUB_API["Public Subnet — API (10.0.0.0/28)"]
             API["OKE API Endpoint"]
         end
