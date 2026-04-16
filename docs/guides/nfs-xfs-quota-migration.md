@@ -1,103 +1,103 @@
 # NFS XFS Project Quota Migration
 
-## 背景
+## Background
 
-`nfs-server-provisioner` 的 backing volume 原先使用 `oci-bv` StorageClass（ext4 格式）。
-ext4 無法支援 XFS project quotas，導致所有 NFS PVC 沒有真實的 storage 上限：
+The `nfs-server-provisioner` backing volume originally used the `oci-bv` StorageClass (ext4 format).
+ext4 does not support XFS project quotas, resulting in no real storage limits for any NFS PVC:
 
-- Pod 可以寫超過 `requests.storage` 指定的容量
-- `kubelet_volume_stats_used_bytes` 對所有 NFS PVC 回傳相同值（NFS filesystem 總用量）
-- Dashboard 的 "FS Used %" 無法反映 per-PVC 實際使用狀況
+- Pods can write beyond the capacity specified in `requests.storage`
+- `kubelet_volume_stats_used_bytes` returns the same value for all NFS PVCs (total NFS filesystem usage)
+- The dashboard's "FS Used %" cannot reflect actual per-PVC usage
 
-本次遷移目標：
+Migration objectives:
 
-1. 以 XFS 格式的 backing volume 重建 NFS provisioner
-2. 啟用 `--enable-xfs-quota`，讓每個 PVC 的目錄受到 XFS project quota 限制
-3. 完整備份與還原所有 NFS PVC 資料
+1. Rebuild the NFS provisioner with an XFS-formatted backing volume
+2. Enable `--enable-xfs-quota` so that each PVC's directory is subject to XFS project quota limits
+3. Fully back up and restore all NFS PVC data
 
 ---
 
-## 遷移前確認
+## Pre-Migration Verification
 
 ```bash
-# 確認備份工具就緒
+# Verify backup tools are ready
 command -v kubectl && kubectl cluster-info
 
-# 確認當前 PVC 狀態
+# Check current PVC status
 kubectl get pvc -A | grep nfs
 ```
 
 ---
 
-## Phase 0：備份所有 NFS PVC 資料
+## Phase 0: Back Up All NFS PVC Data
 
 ```bash
 ./scripts/backup-nfs-data.sh
 ```
 
-腳本會自動：
+The script will automatically:
 
-1. Scale down：n8n
-2. 使用 temp Pod + tar 備份 n8n PVC 資料至 `backups/nfs-<timestamp>/`
+1. Scale down: n8n
+2. Use a temp Pod + tar to back up n8n PVC data to `backups/nfs-<timestamp>/`
 3. Scale back up
 
-備份後確認：
+Post-backup verification:
 
 ```bash
 ls -lh backups/nfs-<timestamp>/
-# 應看到：n8n.tar.gz
+# Expected: n8n.tar.gz
 ```
 
-> ⚠️ **請確保 `backups/` 目錄已備份到安全位置再繼續。**
+> [!] **Ensure the `backups/` directory is backed up to a safe location before proceeding.**
 
 ---
 
-## Phase 1：Scale Down 所有 NFS Workloads
+## Phase 1: Scale Down All NFS Workloads
 
-確保沒有 Pod 正在寫入 NFS PVC：
+Ensure no Pods are writing to NFS PVCs:
 
 ```bash
 kubectl scale deployment n8n-main -n n8n --replicas=0
 
-# 等待 terminate
+# Wait for termination
 kubectl wait --for=delete pod -n n8n -l app.kubernetes.io/name=n8n --timeout=120s
 ```
 
 ---
 
-## Phase 2：刪除 NFS Helm Release 與 Backing PVC
+## Phase 2: Delete NFS Helm Release and Backing PVC
 
-> ⚠️ 此步驟會刪除 NFS 的所有資料。請確認 Phase 0 備份已完成。
+> [!] This step will delete all NFS data. Confirm that the Phase 0 backup is complete.
 
 ```bash
-# 刪除 Helm release（不刪除 namespace）
+# Delete the Helm release (do not delete the namespace)
 helm uninstall nfs-server-provisioner -n nfs-storage
 
-# 刪除 NFS PVC 和其下的所有子目錄 PVCs
+# Delete NFS PVCs and all sub-directory PVCs
 kubectl delete pvc -n n8n n8n-data
 
-# 刪除 NFS backing PVC（這會觸發 OCI block volume 刪除）
+# Delete the NFS backing PVC (this triggers OCI block volume deletion)
 kubectl delete pvc data-nfs-server-provisioner-0 -n nfs-storage
 
-# 確認 PVC 都已刪除
+# Confirm all PVCs have been deleted
 kubectl get pvc -A
 ```
 
 ---
 
-## Phase 3：Terraform Apply（重建 XFS 版本）
+## Phase 3: Terraform Apply (Rebuild with XFS)
 
 ```bash
 terraform apply
 ```
 
-Terraform 會：
+Terraform will:
 
-1. 建立 StorageClass `oci-bv-xfs`（`blockvolume.csi.oraclecloud.com` + `fstype=xfs`）
-2. 重建 `nfs-server-provisioner`，使用 `oci-bv-xfs` + `--enable-xfs-quota`
-3. 重建 Terraform-managed PVC（`n8n-data`）
+1. Create StorageClass `oci-bv-xfs` (`blockvolume.csi.oraclecloud.com` + `fstype=xfs`)
+2. Rebuild `nfs-server-provisioner` using `oci-bv-xfs` + `--enable-xfs-quota`
+3. Rebuild Terraform-managed PVCs (`n8n-data`)
 
-等待 NFS provisioner 就緒：
+Wait for the NFS provisioner to become ready:
 
 ```bash
 kubectl wait pod -n nfs-storage \
@@ -105,55 +105,55 @@ kubectl wait pod -n nfs-storage \
   --for=condition=Ready --timeout=300s
 ```
 
-確認 XFS quota 已啟用：
+Verify that XFS quota is enabled:
 
 ```bash
 NFS_POD=$(kubectl get pod -n nfs-storage -l app=nfs-server-provisioner \
   -o jsonpath='{.items[0].metadata.name}')
 
-# 確認 /export 是 XFS 格式
+# Verify /export is XFS formatted
 kubectl exec -n nfs-storage "${NFS_POD}" -- df -T /export
 
-# 確認 prjquota mount option
+# Verify prjquota mount option
 kubectl exec -n nfs-storage "${NFS_POD}" -- mount | grep /export
 ```
 
 ---
 
-## Phase 4：還原資料
+## Phase 4: Restore Data
 
 ```bash
 ./scripts/restore-nfs-data.sh backups/nfs-<timestamp>
 ```
 
-腳本會自動：
+The script will automatically:
 
-1. Scale down n8n（確保 PVC 不被寫入）
-2. 用 temp Pod + tar 將資料還原至 PVC
+1. Scale down n8n (ensure the PVC is not being written to)
+2. Use a temp Pod + tar to restore data to the PVC
 3. Scale back up
 
 ---
 
-## Phase 5：驗證
+## Phase 5: Verification
 
-### 確認服務正常
+### Confirm Services Are Running
 
 ```bash
 kubectl get pod -n n8n
 kubectl get pvc -A
 ```
 
-### 確認 XFS Quota 生效
+### Confirm XFS Quota Is Active
 
 ```bash
 NFS_POD=$(kubectl get pod -n nfs-storage -l app=nfs-server-provisioner \
   -o jsonpath='{.items[0].metadata.name}')
 
-# 查看所有 project quota（應看到每個 PVC 對應的 quota 條目）
+# View all project quotas (expect one quota entry per PVC)
 kubectl exec -n nfs-storage "${NFS_POD}" -- xfs_quota -x -c 'report -h' /export
 ```
 
-預期輸出範例：
+Expected output example:
 
 ```
 Project quota on /export (blockvolume.csi.oraclecloud.com)
@@ -165,10 +165,10 @@ Project ID   Used   Soft   Hard Warn/Grace
 ...
 ```
 
-### 確認 kubelet Volume Metrics
+### Confirm kubelet Volume Metrics
 
 ```bash
-# kubelet 內建 volume stats 可驗證 per-PVC used/capacity
+# kubelet built-in volume stats can verify per-PVC used/capacity
 kubectl get --raw "/api/v1/nodes/$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')/proxy/stats/summary" | \
   jq '.pods[].volume[]? | select(.pvcRef != null) | {ns: .pvcRef.namespace, pvc: .pvcRef.name, used: .usedBytes, cap: .capacityBytes}'
 ```
@@ -177,8 +177,8 @@ kubectl get --raw "/api/v1/nodes/$(kubectl get nodes -o jsonpath='{.items[0].met
 
 ## Rollback
 
-如果遷移失敗，可以從備份還原舊的 ext4 NFS：
+If the migration fails, you can restore the old ext4 NFS from backup:
 
-1. 恢復原本的 `main.tf`（移除 `oci-bv-xfs` StorageClass 和 `server.args`）
+1. Revert `main.tf` to its original state (remove the `oci-bv-xfs` StorageClass and `server.args`)
 2. `terraform apply`
 3. `./scripts/restore-nfs-data.sh backups/nfs-<timestamp>`
