@@ -1,0 +1,79 @@
+# ──────────────── Loki Helm Values ────────────────
+# Chart: grafana-community/loki
+# Repo:  https://grafana-community.github.io/helm-charts
+#
+# OKE Always Free — Single Binary, filesystem backend on NFS
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+    ring:
+      kvstore:
+        store: inmemory
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    retention_period: 8760h    # 1 year
+    ingestion_rate_mb: 4
+    ingestion_burst_size_mb: 6
+    max_query_series: 500
+    max_query_parallelism: 2
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+    compaction_interval: 10m
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+
+singleBinary:
+  replicas: 1
+  persistence:
+    storageClass: nfs
+    size: 30Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  nodeSelector:
+    kubernetes.io/arch: arm64
+
+# Gateway / self-monitoring / canary not required
+gateway:
+  enabled: false
+monitoring:
+  selfMonitoring:
+    enabled: false
+  lokiCanary:
+    enabled: false
+
+# OKE uses CRI-O short-name enforcement — all images must use fully qualified registry paths
+memcached:
+  image:
+    repository: docker.io/library/memcached
+
+memcachedExporter:
+  image:
+    repository: docker.io/prom/memcached-exporter
+
+# Distributed components not required
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
