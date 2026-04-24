@@ -87,10 +87,25 @@ The following resources are **NOT** Always Free and will incur charges:
 - **Exceeding ARM limits**: Validation rules prevent exceeding 4 OCPUs / 24 GB RAM / 200 GB block storage (boot + NFS)
 - **Load Balancer**: OCI Always Free includes **1** flexible Load Balancer (10 Mbps). Creating a second Kubernetes Service of type `LoadBalancer` will incur charges (~$10–30/month). This module uses `ClusterIP` + Cloudflare Tunnel for ingress — no LB required. If you do create a `LoadBalancer` Service, limit to exactly one
 
+> [!WARNING]
+> **Avoid `Service.type=LoadBalancer` unless you intend to consume the single free LB slot.** OKE provisions a real OCI Load Balancer for every such Service. The first one consumes the Always Free slot; any additional one is billed (~$10–30/month) and is not blocked by Terraform — guard this at the Kubernetes layer (RBAC, OPA/Kyverno, or simple convention) if untrusted operators have cluster access.
+
 > [!CAUTION]
 > **Sensitive values in Terraform state** — `terraform.tfstate` contains secrets such as `n8n_encryption_key` and `cloudflare_tunnel_token` in plaintext. **Never commit state files to version control.** For production use, configure a [remote backend](https://developer.hashicorp.com/terraform/language/backend) with encryption at rest (e.g., OCI Object Storage with SSE). Consider using [OCI Vault](https://docs.oracle.com/en-us/iaas/Content/KeyManagement/home.htm) or [SOPS](https://github.com/getsops/sops) for external secret management.
 
 ## Security Notes
+
+### Kubernetes API Endpoint Exposure
+
+The OKE API endpoint is reachable from `0.0.0.0/0` by default for backward compatibility. While OKE authentication is the primary control, exposing the public Internet directly to the API server is unnecessary attack surface for most deployments.
+
+To restrict access to known IP ranges (recommended for any non-development cluster), set:
+
+```hcl
+kube_api_allowed_cidrs = ["203.0.113.10/32", "198.51.100.0/24"]
+```
+
+The variable accepts a list of CIDR blocks; only those sources will be allowed to reach TCP/6443.
 
 ### NFS Server Elevated Privileges
 
@@ -101,13 +116,26 @@ The NFS server provisioner requires Linux capabilities `SYS_ADMIN`, `SYS_RESOURC
 
 The NFS server runs in its own `nfs-storage` namespace, isolated from application workloads. If the NFS server container were compromised, the attacker would gain host-level device access on that node.
 
+### NFS Single-Replica Limitation
+
+The bundled `nfs-server-provisioner` chart runs as **a single StatefulSet replica** and cannot be scaled horizontally — NFS-Ganesha does not support active-active replication. This is an intentional architectural trade-off for an Always Free single-node cluster, not a bug:
+
+- During NFS pod restarts (chart upgrade, node eviction, OOM kill) every workload that mounts an NFS PVC will see I/O errors until the pod becomes Ready again.
+- Conservative CPU/memory limits are applied via Terraform Helm values to keep the privileged NFS server from starving the rest of the node.
+- For higher availability, switch to a managed file storage service (OCI File Storage, Filesystem-as-a-Service) — those are not part of the Always Free tier and are out of scope for this module.
+
+### Observability Stack
+
+The Prometheus + Loki + Alloy stack documented under `docs/guides/observability.md` and `k8s/monitoring/` is **not** managed by this Terraform configuration. It is installed manually (Helm + `kubectl apply`) and intentionally kept out of the module to avoid coupling cluster lifecycle with monitoring lifecycle. Treat that directory as reference material; running `terraform destroy` will not uninstall the monitoring stack and `terraform apply` will not reconcile drift in it.
+
 ## Backup & Disaster Recovery
 
 The n8n PVC uses `lifecycle { prevent_destroy = true }` to guard against accidental data loss. To perform a full `terraform destroy`:
 
 ```bash
-# 1. Back up n8n data first
-kubectl cp n8n/n8n-main-0:/home/node/.n8n ./n8n-backup
+# 1. Back up n8n data first (uses label-based pod lookup; works for the
+#    Helm-managed Deployment regardless of the random pod suffix).
+./scripts/backup-n8n.sh
 
 # 2. Remove the PVC from Terraform state (does NOT delete the actual PVC)
 terraform state rm 'kubernetes_persistent_volume_claim_v1.n8n_data[0]'
@@ -166,6 +194,7 @@ kubectl get nodes
 | `ssh_public_key` | SSH public key for nodes | `string` | `null` | no |
 | `enable_metrics_server` | Deploy metrics-server for `kubectl top` | `bool` | `true` | no |
 | `metrics_server_chart_version` | metrics-server Helm chart version (null = latest) | `string` | `null` | no |
+| `kube_api_allowed_cidrs` | CIDR blocks allowed to reach the Kubernetes API endpoint (TCP/6443) | `list(string)` | `["0.0.0.0/0"]` | no |
 | `enable_nfs_storage` | Deploy NFS server with dynamic PV provisioning | `bool` | `false` | no |
 | `nfs_volume_size_in_gbs` | NFS backing block volume size (GB) | `number` | `136` | no |
 | `enable_budget_alert` | Enable OCI Budget alert | `bool` | `true` | no |

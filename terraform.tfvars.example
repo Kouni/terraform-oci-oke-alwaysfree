@@ -28,6 +28,11 @@ compartment_ocid = "ocid1.tenancy.oc1..example"  # Use tenancy OCID for root com
 # enable_budget_alert = true
 notification_email    = "you@example.com"
 
+# ──────────────── Network Hardening ────────────────
+# Restrict the public Kubernetes API endpoint to known operator/CI CIDRs.
+# Defaults to ["0.0.0.0/0"] when unset for backward compatibility.
+# kube_api_allowed_cidrs = ["203.0.113.10/32", "198.51.100.0/24"]
+
 # ──────────────── Cluster Add-ons ────────────────
 # enable_metrics_server        = true
 # metrics_server_chart_version = null  # null = latest; pin with e.g. "3.12.2"
