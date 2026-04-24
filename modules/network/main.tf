@@ -1,15 +1,7 @@
-# Fetch OCI services CIDR for Service Gateway
-data "oci_core_services" "all" {
-  filter {
-    name   = "name"
-    values = ["All .* Services In Oracle Services Network"]
-    regex  = true
-  }
-}
-
 locals {
-  all_services_id   = data.oci_core_services.all.services[0].id
-  all_services_cidr = data.oci_core_services.all.services[0].cidr_block
+  # vcn_cidr is fixed because subnet CIDRs (10.0.0.0/28, 10.0.1.0/24, 10.0.2.0/24)
+  # are hardcoded within this range. Do not parameterize.
+  vcn_cidr = "10.0.0.0/16"
 
   api_endpoint_subnet_cidr = "10.0.0.0/28"
   worker_subnet_cidr       = "10.0.1.0/24"
@@ -22,7 +14,7 @@ locals {
 
 resource "oci_core_vcn" "this" {
   compartment_id = var.compartment_ocid
-  cidr_blocks    = [var.vcn_cidr]
+  cidr_blocks    = [local.vcn_cidr]
   display_name   = "oke-vcn"
   dns_label      = "okevcn"
 
@@ -42,44 +34,6 @@ resource "oci_core_internet_gateway" "this" {
   freeform_tags = var.freeform_tags
 }
 
-# Always created even though no route table currently references it.
-# OCI does not allow IGW and SGW (All Services) in the same route table,
-# so the SGW is unused in this all-public-subnet design.  It exists to
-# enable a future private-subnet migration without requiring a destroy/
-# recreate cycle — just add SGW routes when converting worker subnet.
-resource "oci_core_service_gateway" "this" {
-  compartment_id = var.compartment_ocid
-  vcn_id         = oci_core_vcn.this.id
-  display_name   = "service-gateway"
-
-  services {
-    service_id = local.all_services_id
-  }
-
-  freeform_tags = var.freeform_tags
-
-  lifecycle {
-    precondition {
-      condition     = length(data.oci_core_services.all.services) > 0
-      error_message = "No OCI services found matching 'All * Services In Oracle Services Network'. Verify the OCI region supports Service Gateway."
-    }
-  }
-}
-
-# Placeholder for future private-subnet migration. Currently no route table
-# references this gateway because all subnets are public. When converting
-# the worker subnet to private, add a route rule pointing 0.0.0.0/0 to
-# this NAT Gateway and remove the IGW rule from the worker route table.
-resource "oci_core_nat_gateway" "this" {
-  count = var.enable_nat_gateway ? 1 : 0
-
-  compartment_id = var.compartment_ocid
-  vcn_id         = oci_core_vcn.this.id
-  display_name   = "nat-gateway"
-
-  freeform_tags = var.freeform_tags
-}
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Route Tables
 # ──────────────────────────────────────────────────────────────────────────────
@@ -95,11 +49,6 @@ resource "oci_core_route_table" "api_endpoint" {
     destination_type  = "CIDR_BLOCK"
   }
 
-  # NOTE: OCI does not allow IGW and SGW (All Services) in the same route table.
-  # SGW routes are only valid in private subnets (no IGW). In this public-subnet
-  # design, OCI service traffic egresses via IGW. The SGW exists for future
-  # private-subnet migration; see the NAT Gateway comment above.
-
   freeform_tags = var.freeform_tags
 }
 
@@ -113,11 +62,6 @@ resource "oci_core_route_table" "worker" {
     destination       = "0.0.0.0/0"
     destination_type  = "CIDR_BLOCK"
   }
-
-  # NOTE: OCI does not allow IGW and SGW (All Services) in the same route table.
-  # SGW routes are only valid in private subnets (no IGW). In this public-subnet
-  # design, OCI service traffic egresses via IGW. The SGW exists for future
-  # private-subnet migration; see the NAT Gateway comment above.
 
   freeform_tags = var.freeform_tags
 }
@@ -205,19 +149,6 @@ resource "oci_core_security_list" "api_endpoint" {
     stateless        = false
   }
 
-  # Allow API endpoint to reach OCI services
-  egress_security_rules {
-    protocol         = "6" # TCP
-    destination      = local.all_services_cidr
-    destination_type = "SERVICE_CIDR_BLOCK"
-    stateless        = false
-
-    tcp_options {
-      min = 443
-      max = 443
-    }
-  }
-
   # Allow ICMP path discovery to worker subnet
   egress_security_rules {
     protocol         = "1" # ICMP
@@ -299,14 +230,6 @@ resource "oci_core_security_list" "worker" {
     protocol         = "all"
     destination      = "0.0.0.0/0"
     destination_type = "CIDR_BLOCK"
-    stateless        = false
-  }
-
-  # Allow worker to reach OCI services via Service Gateway
-  egress_security_rules {
-    protocol         = "6" # TCP
-    destination      = local.all_services_cidr
-    destination_type = "SERVICE_CIDR_BLOCK"
     stateless        = false
   }
 

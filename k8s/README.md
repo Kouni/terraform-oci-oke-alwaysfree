@@ -346,7 +346,36 @@ kubectl get pv "$PV_NAME" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'
 
 - n8n data (SQLite DB, workflows, credentials) is stored on an NFS PVC, mounted at `/home/node/.n8n`
 - NFS is provided by `nfs-server-provisioner` (namespace: `nfs-storage`), backed by OCI Block Volume
+- The backing block volume is formatted as **XFS with project quotas enabled** (`--enable-xfs-quota`); each PVC's `requests.storage` becomes a hard quota — Pods cannot exceed it even when the underlying volume has free space
 - It is recommended to change the PV reclaim policy to `Retain` immediately after deployment (see steps above)
+
+#### Verify XFS quotas are active
+
+```bash
+NFS_POD=$(kubectl -n nfs-storage get pod -l app=nfs-server-provisioner -o jsonpath='{.items[0].metadata.name}')
+kubectl -n nfs-storage exec "$NFS_POD" -- xfs_quota -x -c 'report -h' /export
+# Expect one line per PVC; "Hard" column should match the PVC's requests.storage
+```
+
+#### Re-formatting the NFS volume (one-time migration, destructive)
+
+If an existing deployment still has an `ext4` backing volume (the chart default
+prior to this repo enabling XFS), a one-time re-format is required to activate
+quotas. **This deletes all PVC data on the NFS volume** — back up first.
+
+```bash
+# 1. Back up data, then scale the provisioner down
+kubectl -n nfs-storage scale statefulset nfs-server-provisioner --replicas=0
+
+# 2. SSH to the worker node and re-format the OCI block volume as XFS
+sudo umount /var/lib/kubelet/plugins/...   # path of the NFS PV
+sudo mkfs.xfs -f -L nfs-data /dev/oracleoci/oraclevdb
+echo 'LABEL=nfs-data /mnt/nfs xfs defaults,prjquota 0 0' | sudo tee -a /etc/fstab
+sudo mount -a
+
+# 3. Scale the provisioner back up; restore data into the new PVCs
+kubectl -n nfs-storage scale statefulset nfs-server-provisioner --replicas=1
+```
 
 ### n8n PVC Is a Permanent Resource
 

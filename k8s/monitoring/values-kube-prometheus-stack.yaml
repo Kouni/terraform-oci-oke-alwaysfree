@@ -1,0 +1,127 @@
+# ──────────────── kube-prometheus-stack Helm Values ────────────────
+# Chart: prometheus-community/kube-prometheus-stack
+# Repo:  https://prometheus-community.github.io/helm-charts
+#
+# OKE Always Free — single-node ARM64, NFS storage, no Thanos
+
+# ──────────────── Prometheus ────────────────
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 30d
+    retentionSize: 14GB
+    resources:
+      requests:
+        cpu: 300m
+        memory: 1.5Gi
+      limits:
+        cpu: "1"
+        memory: 3Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 15Gi
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    # remote_write disabled — local TSDB is the sole storage backend
+
+# ──────────────── Grafana ────────────────
+grafana:
+  enabled: true
+  sidecar:
+    datasources:
+      prune: true
+  deleteDatasources:
+    - name: AlertManager
+      orgId: 1
+  persistence:
+    enabled: true
+    storageClassName: nfs
+    size: 2Gi
+    # Grafana uses a Deployment (not StatefulSet); helm uninstall deletes its PVC.
+    # This annotation preserves the PVC on helm uninstall to prevent data loss.
+    annotations:
+      "helm.sh/resource-policy": keep
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  grafana.ini:
+    server:
+      root_url: https://grafana.kouni.io
+    feature_toggles:
+      enable:
+        - unifiedNavbars
+        - dashboardNewLayouts
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc:3100
+
+# ──────────────── AlertManager ────────────────
+alertmanager:
+  alertmanagerSpec:
+    replicas: 1
+    retention: 120h
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    nodeSelector:
+      kubernetes.io/arch: arm64
+
+# ──────────────── kube-state-metrics ────────────────
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ──────────────── node-exporter ────────────────
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ──────────────── Prometheus Operator ────────────────
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+  nodeSelector:
+    kubernetes.io/arch: arm64
+
+# ──────────────── Global ────────────────
+commonLabels:
+  alwaysfree: "true"

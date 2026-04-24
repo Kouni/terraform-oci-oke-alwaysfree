@@ -47,10 +47,8 @@ resource "terraform_data" "always_free_validation" {
 module "network" {
   source = "./modules/network"
 
-  compartment_ocid   = var.compartment_ocid
-  vcn_cidr           = var.vcn_cidr
-  enable_nat_gateway = var.enable_nat_gateway
-  freeform_tags      = var.freeform_tags
+  compartment_ocid = var.compartment_ocid
+  freeform_tags    = var.freeform_tags
 }
 
 module "oke" {
@@ -305,7 +303,7 @@ resource "kubernetes_secret_v1" "n8n_secrets" {
     N8N_ENCRYPTION_KEY = var.n8n_encryption_key
     N8N_HOST           = var.n8n_host
     N8N_PORT           = "5678"
-    N8N_PROTOCOL       = "https"
+    N8N_PROTOCOL       = "http"
   }
 
   lifecycle {

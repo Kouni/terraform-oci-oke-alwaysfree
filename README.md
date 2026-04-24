@@ -32,7 +32,6 @@ graph TB
         end
 
         IGW["Internet Gateway ↔ Public Subnets"]
-        SGW["Service Gateway ↔ OCI Services<br/>(image pull, OKE communication)"]
     end
 
     CF -.->|"outbound<br/>connection"| CFD
@@ -45,7 +44,7 @@ graph TB
 
     class CF cf
     class API,LB,WORKER,CFD node_box
-    class IGW,SGW gw
+    class IGW gw
     class N8N,NFS optional
 
     style VCN fill:#263238,color:#fff,stroke:#546e7a,stroke-width:2px,stroke-dasharray:5 5
@@ -62,7 +61,7 @@ graph TB
 
 | Module | Purpose |
 |---|---|
-| `modules/network` | VCN with 3 public subnets (API `10.0.0.0/28`, Workers `10.0.1.0/24`, LB `10.0.2.0/24`), Internet Gateway, Service Gateway, optional NAT Gateway |
+| `modules/network` | VCN (`10.0.0.0/16`) with 3 public subnets (API `10.0.0.0/28`, Workers `10.0.1.0/24`, LB `10.0.2.0/24`) and an Internet Gateway |
 | `modules/oke` | `BASIC_CLUSTER` (Flannel CNI) with ARM node pool (`VM.Standard.A1.Flex`). ARM image auto-discovered at plan time by filtering OKE-optimized `aarch64` images matching the cluster's Kubernetes `major.minor` version |
 | `modules/budget` | Monthly OCI budget with absolute alert thresholds at $0.01, $1, $2, $3, $4, and $5 |
 
@@ -75,14 +74,14 @@ Helm releases for `metrics-server`, `nfs-server-provisioner`, `n8n`, and the `cl
 | OKE Basic Cluster | Control plane fully managed and free |
 | VM.Standard.A1.Flex | Up to 4 OCPUs + 24 GB RAM total |
 | Block Storage | Up to 200 GB total (boot volumes + NFS backing storage) |
-| VCN, Subnets, Gateways | Free (IGW, SGW) |
+| VCN, Subnets, Gateways | Free (IGW) |
 | Load Balancer | 1x flexible (10 Mbps) |
 
 ## Cost Warnings
 
 The following resources are **NOT** Always Free and will incur charges:
 
-- **NAT Gateway**: Disabled by default (`enable_nat_gateway = false`)
+- **NAT Gateway**: Not deployed — public subnets reach the internet via the Internet Gateway only
 - **Enhanced Cluster**: Hardcoded to `BASIC_CLUSTER` to prevent accidental charges
 - **Non-ARM shapes**: Hardcoded to `VM.Standard.A1.Flex`
 - **Exceeding ARM limits**: Validation rules prevent exceeding 4 OCPUs / 24 GB RAM / 200 GB block storage (boot + NFS)
@@ -169,8 +168,6 @@ kubectl get nodes
 | `metrics_server_chart_version` | metrics-server Helm chart version (null = latest) | `string` | `null` | no |
 | `enable_nfs_storage` | Deploy NFS server with dynamic PV provisioning | `bool` | `false` | no |
 | `nfs_volume_size_in_gbs` | NFS backing block volume size (GB) | `number` | `136` | no |
-| `vcn_cidr` | VCN CIDR block | `string` | `"10.0.0.0/16"` | no |
-| `enable_nat_gateway` | Enable NAT Gateway (costs $) | `bool` | `false` | no |
 | `enable_budget_alert` | Enable OCI Budget alert | `bool` | `true` | no |
 | `notification_email` | Email for budget alerts | `string` | `null` | no² |
 | `enable_cloudflare_tunnel` | Deploy shared Cloudflare Zero Trust Tunnel | `bool` | `false` | no |
@@ -207,13 +204,13 @@ kubectl get nodes
 | `nfs_storage_class` | NFS StorageClass name (`"nfs"`) for dynamic PV provisioning (null if disabled) |
 | `budget_id` | The OCID of the budget (null if disabled) |
 | `n8n_namespace` | Kubernetes namespace for n8n (always created; persists when `enable_n8n = false`) |
-| `n8n_setup_instructions` | Required `terraform.tfvars` variables for enabling n8n and Cloudflare Tunnel |
 
 ## Cloudflare Zero Trust Tunnel Setup
 
 Cloudflare Tunnel is managed entirely via Terraform. Namespaces, secrets, and the `cloudflared` Deployment are all declared in root `main.tf` — no manual `kubectl apply` required.
 
-See [k8s/README.md](k8s/README.md) for architecture details and troubleshooting.
+- See [k8s/README.md](k8s/README.md) for n8n + Cloudflare Tunnel deployment details and troubleshooting.
+- See [docs/guides/observability.md](docs/guides/observability.md) for the optional Prometheus + Loki + Alloy monitoring stack.
 
 ```bash
 # 1. Add to terraform.tfvars:
