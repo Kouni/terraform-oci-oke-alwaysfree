@@ -109,25 +109,6 @@ variable "ssh_public_key" {
   default     = null
 }
 
-# Network configuration
-
-variable "vcn_cidr" {
-  description = "CIDR block for the VCN. Must be 10.0.0.0/16 because subnet CIDRs are fixed"
-  type        = string
-  default     = "10.0.0.0/16"
-
-  validation {
-    condition     = var.vcn_cidr == "10.0.0.0/16"
-    error_message = "vcn_cidr must be \"10.0.0.0/16\". Subnet CIDRs are hardcoded within this range."
-  }
-}
-
-variable "enable_nat_gateway" {
-  description = "Create a NAT Gateway (placeholder for future private-subnet migration). WARNING: NAT Gateway is NOT Always Free and will incur charges. Currently no route table references it because all subnets are public"
-  type        = bool
-  default     = false
-}
-
 # Budget alert
 
 variable "enable_budget_alert" {
