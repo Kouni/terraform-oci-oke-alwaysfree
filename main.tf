@@ -47,8 +47,9 @@ resource "terraform_data" "always_free_validation" {
 module "network" {
   source = "./modules/network"
 
-  compartment_ocid = var.compartment_ocid
-  freeform_tags    = var.freeform_tags
+  compartment_ocid       = var.compartment_ocid
+  freeform_tags          = var.freeform_tags
+  kube_api_allowed_cidrs = var.kube_api_allowed_cidrs
 }
 
 module "oke" {

@@ -89,16 +89,20 @@ resource "oci_core_security_list" "api_endpoint" {
   vcn_id         = oci_core_vcn.this.id
   display_name   = "api-endpoint-sl"
 
-  # Allow Kubernetes API access from anywhere (secured by OKE auth)
-  ingress_security_rules {
-    protocol    = "6" # TCP
-    source      = "0.0.0.0/0"
-    source_type = "CIDR_BLOCK"
-    stateless   = false
+  # Allow Kubernetes API access from the configured CIDRs (authentication still enforced by OKE).
+  # Defaults to 0.0.0.0/0 for backward compatibility; tighten via var.kube_api_allowed_cidrs.
+  dynamic "ingress_security_rules" {
+    for_each = toset(var.kube_api_allowed_cidrs)
+    content {
+      protocol    = "6" # TCP
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      stateless   = false
 
-    tcp_options {
-      min = 6443
-      max = 6443
+      tcp_options {
+        min = 6443
+        max = 6443
+      }
     }
   }
 
@@ -186,10 +190,11 @@ resource "oci_core_security_list" "worker" {
     stateless   = false
   }
 
-  # Allow ICMP path discovery from API endpoint
+  # Allow ICMP path discovery (PMTU) from within the VCN only.
+  # Previously open to 0.0.0.0/0; narrowed to local.vcn_cidr to reduce reconnaissance surface.
   ingress_security_rules {
     protocol    = "1" # ICMP
-    source      = "0.0.0.0/0"
+    source      = local.vcn_cidr
     source_type = "CIDR_BLOCK"
     stateless   = false
 
