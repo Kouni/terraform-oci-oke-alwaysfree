@@ -84,6 +84,12 @@ data "oci_containerengine_cluster_kube_config" "this" {
 locals {
   kubeconfig             = yamldecode(data.oci_containerengine_cluster_kube_config.this.content)
   cluster_ca_certificate = base64decode(try(local.kubeconfig.clusters[0].cluster["certificate-authority-data"], ""))
+
+  # Reuse the exec credential plugin invocation that OCI itself emits in the
+  # generated kubeconfig. This avoids brittle string parsing of the cluster
+  # OCID and stays correct even if OCI changes OCID layout in the future.
+  kubeconfig_exec      = try(local.kubeconfig.users[0].user.exec, null)
+  kubeconfig_exec_args = try(local.kubeconfig_exec.args, [])
 }
 
 provider "helm" {
@@ -95,7 +101,7 @@ provider "helm" {
       # Track: https://github.com/oracle/oci-cli/issues — update to v1 once OCI CLI supports it.
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "oci"
-      args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
+      args        = local.kubeconfig_exec_args
     }
   }
 }
@@ -108,7 +114,7 @@ provider "kubernetes" {
     # Track: https://github.com/oracle/oci-cli/issues — update to v1 once OCI CLI supports it.
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "oci"
-    args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
+    args        = local.kubeconfig_exec_args
   }
 }
 
