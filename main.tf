@@ -47,8 +47,9 @@ resource "terraform_data" "always_free_validation" {
 module "network" {
   source = "./modules/network"
 
-  compartment_ocid = var.compartment_ocid
-  freeform_tags    = var.freeform_tags
+  compartment_ocid       = var.compartment_ocid
+  freeform_tags          = var.freeform_tags
+  kube_api_allowed_cidrs = var.kube_api_allowed_cidrs
 }
 
 module "oke" {
@@ -83,6 +84,12 @@ data "oci_containerengine_cluster_kube_config" "this" {
 locals {
   kubeconfig             = yamldecode(data.oci_containerengine_cluster_kube_config.this.content)
   cluster_ca_certificate = base64decode(try(local.kubeconfig.clusters[0].cluster["certificate-authority-data"], ""))
+
+  # Reuse the exec credential plugin invocation that OCI itself emits in the
+  # generated kubeconfig. This avoids brittle string parsing of the cluster
+  # OCID and stays correct even if OCI changes OCID layout in the future.
+  kubeconfig_exec      = try(local.kubeconfig.users[0].user.exec, null)
+  kubeconfig_exec_args = try(local.kubeconfig_exec.args, [])
 }
 
 provider "helm" {
@@ -94,7 +101,7 @@ provider "helm" {
       # Track: https://github.com/oracle/oci-cli/issues — update to v1 once OCI CLI supports it.
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "oci"
-      args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
+      args        = local.kubeconfig_exec_args
     }
   }
 }
@@ -107,7 +114,7 @@ provider "kubernetes" {
     # Track: https://github.com/oracle/oci-cli/issues — update to v1 once OCI CLI supports it.
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "oci"
-    args        = ["ce", "cluster", "generate-token", "--cluster-id", module.oke.cluster_id, "--region", split(".", module.oke.cluster_id)[3]]
+    args        = local.kubeconfig_exec_args
   }
 }
 
@@ -179,6 +186,20 @@ resource "helm_release" "nfs_server_provisioner" {
     securityContext = {
       capabilities = {
         add = ["DAC_READ_SEARCH", "SYS_RESOURCE", "SYS_ADMIN"]
+      }
+    }
+    # Conservative resource bounds to keep the privileged NFS server from
+    # starving other workloads on the single Always Free worker node. The
+    # provisioner is a known single replica (see README), so throttling it is
+    # an availability trade-off, not a scalability one.
+    resources = {
+      requests = {
+        cpu    = "100m"
+        memory = "256Mi"
+      }
+      limits = {
+        cpu    = "1000m"
+        memory = "2Gi"
       }
     }
     # Mount host /dev so xfs_quota can open the backing block device
@@ -278,10 +299,15 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
   }
 
   lifecycle {
-    # Prevent accidental data loss — must be manually removed from state before destroy
+    # Prevent accidental data loss — must be manually removed from state before destroy.
     prevent_destroy = true
-    # PVC spec is immutable after binding; ignore any drift
-    ignore_changes = [spec]
+    # Ignore only the fields the controller mutates after binding so legitimate
+    # in-place changes (e.g. requests.storage when expanding) are not silently
+    # dropped by Terraform.
+    ignore_changes = [
+      spec[0].volume_name,
+      spec[0].selector,
+    ]
   }
 
   depends_on = [helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]
