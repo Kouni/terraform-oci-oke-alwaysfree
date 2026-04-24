@@ -188,6 +188,20 @@ resource "helm_release" "nfs_server_provisioner" {
         add = ["DAC_READ_SEARCH", "SYS_RESOURCE", "SYS_ADMIN"]
       }
     }
+    # Conservative resource bounds to keep the privileged NFS server from
+    # starving other workloads on the single Always Free worker node. The
+    # provisioner is a known single replica (see README), so throttling it is
+    # an availability trade-off, not a scalability one.
+    resources = {
+      requests = {
+        cpu    = "100m"
+        memory = "256Mi"
+      }
+      limits = {
+        cpu    = "1000m"
+        memory = "2Gi"
+      }
+    }
     # Mount host /dev so xfs_quota can open the backing block device
     # (discovered dynamically from /proc/mounts) for quota ioctls.
     extraVolumes = [
@@ -285,10 +299,15 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
   }
 
   lifecycle {
-    # Prevent accidental data loss — must be manually removed from state before destroy
+    # Prevent accidental data loss — must be manually removed from state before destroy.
     prevent_destroy = true
-    # PVC spec is immutable after binding; ignore any drift
-    ignore_changes = [spec]
+    # Ignore only the fields the controller mutates after binding so legitimate
+    # in-place changes (e.g. requests.storage when expanding) are not silently
+    # dropped by Terraform.
+    ignore_changes = [
+      spec[0].volume_name,
+      spec[0].selector,
+    ]
   }
 
   depends_on = [helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n]
