@@ -202,6 +202,17 @@ kubectl -n monitoring port-forward svc/pyroscope 4040:4040
 
 ### Step 8 — Recommended Grafana dashboards
 
+In-repo (under `k8s/monitoring/dashboards/`):
+
+| File                    | Title                          | Purpose                                          |
+|-------------------------|--------------------------------|--------------------------------------------------|
+| `cluster-overview.json` | OKE Formosa - Cluster Overview | Curated single-pane view tuned for this cluster  |
+
+Import via `Dashboards - New - Import - Upload JSON file` (see
+`k8s/monitoring/dashboards/README.md` for details and the API alternative).
+
+Community dashboards worth importing by ID:
+
 | ID   | Name                          | Purpose                  |
 |------|-------------------------------|--------------------------|
 | 7249 | Kubernetes Cluster Overview   | Cluster overview         |
