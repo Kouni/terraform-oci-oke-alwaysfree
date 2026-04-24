@@ -33,16 +33,3 @@ output "n8n_namespace" {
   value       = kubernetes_namespace_v1.n8n.metadata[0].name
 }
 
-output "n8n_setup_instructions" {
-  description = "Required terraform.tfvars variables for enabling n8n and Cloudflare Tunnel"
-  value       = <<-EOT
-    # Set these variables in terraform.tfvars before enabling n8n:
-    #
-    # enable_cloudflare_tunnel  = true
-    # cloudflare_tunnel_token   = "<token from Cloudflare Dashboard → Networks → Tunnels>"
-    #
-    # enable_n8n                = true
-    # n8n_host                  = "<your-n8n-hostname>"
-    # n8n_encryption_key        = "<32-char random string — keep this safe, never rotate>"
-  EOT
-}
