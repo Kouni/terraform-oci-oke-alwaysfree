@@ -222,7 +222,7 @@ Terraform will create the following resources:
 - `kubernetes_namespace_v1.n8n` -- n8n namespace
 - `kubernetes_namespace_v1.tunnel` -- tunnel namespace
 - `kubernetes_secret_v1.n8n_secrets` -- n8n core configuration Secret
-- `kubernetes_secret_v1.cloudflare_tunnel_secret` -- Cloudflare Tunnel token Secret
+- `kubernetes_secret_v1.cloudflare_tunnel` -- Cloudflare Tunnel token Secret
 - `kubernetes_persistent_volume_claim_v1.n8n_data` -- NFS PVC (name: `n8n-data`)
 - `helm_release.n8n[0]` -- n8n Helm release (Standalone mode, SQLite)
 - `kubernetes_deployment_v1.cloudflared[0]` -- cloudflared Tunnel Deployment
