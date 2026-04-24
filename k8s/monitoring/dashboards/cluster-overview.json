@@ -77,7 +77,7 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Number of nodes reporting Ready=true. For Always Free single-node clusters, this should be 1.",
           "id": 1,
           "links": [],
           "title": "Nodes Ready",
@@ -1322,7 +1322,7 @@
               ]
             }
           },
-          "description": "",
+          "description": "DaemonSet desired vs ready replica counts per namespace. Desired and Ready should match.",
           "id": 16,
           "links": [],
           "title": "DaemonSets",
@@ -1419,7 +1419,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "(sum by (pod, namespace) (increase(kube_pod_container_status_restarts_total[1h])) > 0) or vector(0)",
+                        "expr": "sum by (pod, namespace) (increase(kube_pod_container_status_restarts_total[1h])) > 0",
                         "format": "time_series",
                         "instant": false,
                         "legendFormat": "{{namespace}}/{{pod}}",
@@ -1665,7 +1665,7 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Total pods in Running phase across all namespaces.",
           "id": 2,
           "links": [],
           "title": "Running Pods",
@@ -2414,7 +2414,7 @@
           "description": "Kubernetes node conditions. Ready should be Yes, all pressure conditions should be OK.",
           "id": 26,
           "links": [],
-          "title": "Node Health — 10.0.1.212",
+          "title": "Node Health",
           "vizConfig": {
             "group": "stat",
             "kind": "VizConfig",
@@ -2603,7 +2603,10 @@
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum by (pod, namespace) (rate(container_network_receive_bytes_total[5m]))",
-                        "legendFormat": "{{namespace}}/{{pod}}"
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{namespace}}/{{pod}}",
+                        "range": true
                       },
                       "version": "v0"
                     },
@@ -2716,7 +2719,10 @@
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum by (pod, namespace) (rate(container_network_transmit_bytes_total[5m]))",
-                        "legendFormat": "{{namespace}}/{{pod}}"
+                        "format": "time_series",
+                        "instant": false,
+                        "legendFormat": "{{namespace}}/{{pod}}",
+                        "range": true
                       },
                       "version": "v0"
                     },
@@ -2842,7 +2848,7 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Total container restarts cluster-wide over the last 24 hours. Spikes warrant inspection of the Container Restarts panel below.",
           "id": 3,
           "links": [],
           "title": "Restarts (24h)",
@@ -3434,7 +3440,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(container_memory_working_set_bytes{container!=\"\"})",
+                        "expr": "100 * sum(container_memory_working_set_bytes{container!=\"\"}) / sum(machine_memory_bytes)",
                         "instant": true,
                         "legendFormat": "Memory"
                       },
@@ -3448,7 +3454,7 @@
               "transformations": []
             }
           },
-          "description": "Memory working set / allocatable (24 GiB)",
+          "description": "Memory working set as percentage of machine memory (machine_memory_bytes reports kernel-usable RAM, which is slightly less than the 24 GiB OCPU spec).",
           "id": 5,
           "links": [],
           "title": "Memory",
@@ -3462,11 +3468,11 @@
                     "mode": "thresholds"
                   },
                   "decimals": 1,
-                  "max": 25769803776,
+                  "max": 100,
                   "min": 0,
                   "noValue": "0",
                   "thresholds": {
-                    "mode": "percentage",
+                    "mode": "absolute",
                     "steps": [
                       {
                         "color": "#73BF69",
@@ -3486,7 +3492,7 @@
                       }
                     ]
                   },
-                  "unit": "bytes"
+                  "unit": "percent"
                 },
                 "overrides": []
               },
