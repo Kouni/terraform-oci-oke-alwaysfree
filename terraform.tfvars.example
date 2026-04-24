@@ -24,10 +24,6 @@ compartment_ocid = "ocid1.tenancy.oc1..example"  # Use tenancy OCID for root com
 # boot_volume_size_in_gbs = 64
 # ssh_public_key          = "ssh-rsa AAAA..."
 
-# ──────────────── Network ────────────────
-# vcn_cidr           = "10.0.0.0/16"
-# enable_nat_gateway = false  # WARNING: NAT Gateway is NOT Always Free
-
 # ──────────────── Budget Alert ────────────────
 # enable_budget_alert = true
 notification_email    = "you@example.com"
