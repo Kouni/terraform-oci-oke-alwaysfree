@@ -8,6 +8,24 @@ Source-of-truth JSON exports for Grafana dashboards used by this cluster.
 |------|-------|-------------|
 | `cluster-overview.json` | OKE Formosa - Cluster Overview | Prometheus, Loki |
 
+### `cluster-overview.json` rows
+
+1. **(header)** - Nodes Ready, Running Pods, Restarts (24h), CPU, Memory, Disk
+2. **Worker Node** - per-node health, CPU/memory, disk, network
+3. **Services & Workloads** - deployments, statefulsets, daemonsets, pod phases, restarts
+4. **Pod Resources** - CPU/memory by pod, network by pod
+5. **Logs & Events** - error logs, warning events, log volume by namespace
+6. **Cluster Critical Path** - apiserver 5xx / p99 / NFS provisioner health & restarts
+7. **Node Saturation** - root fs / conntrack / file descriptors / disk I/O
+8. **Observability Backplane** - Loki & Tempo ingestion + 5xx, observability pods up
+9. **Top-N Pods** - top 10 by CPU and memory (working set)
+10. **Cloudflare Tunnel** - cloudflared readiness, restarts, CPU, memory
+
+Some panels in rows 6-10 depend on metrics emitted by specific Helm
+releases (kube-state-metrics, node-exporter, Loki, Tempo). Empty panels
+are an indication that the corresponding component is not deployed or
+its `ServiceMonitor` is missing.
+
 ## Update workflow
 
 1. Edit dashboard in Grafana UI (Cloudflare Tunnel or port-forward).
