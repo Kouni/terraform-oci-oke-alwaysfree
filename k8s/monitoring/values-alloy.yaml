@@ -1,0 +1,84 @@
+# ──────────────── Grafana Alloy Helm Values ────────────────
+# Chart: grafana/alloy
+# Repo:  https://grafana.github.io/helm-charts
+#
+# OKE Always Free — DaemonSet mode
+# Logs-only pipeline (Pod stdout/stderr → Loki). Metrics are scraped by
+# Prometheus directly; tracing and profiling are intentionally not deployed.
+
+alloy:
+  configMap:
+    content: |
+      // ──────────────── Kubernetes Discovery ────────────────
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      // ──────────────── Discovery Relabeling ────────────────
+      // Convert __meta_kubernetes_* discovery labels into Loki stream labels
+      // so Grafana can group logs by namespace, pod, container, and service.
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        // service_name fallback chain (lowest → highest priority):
+        //   container name → app label → app.kubernetes.io/name
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          regex         = "(.+)"
+          target_label  = "service_name"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          regex         = "(.+)"
+          target_label  = "service_name"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          regex         = "(.+)"
+          target_label  = "service_name"
+        }
+      }
+
+      // ──────────────── Log Collection → Loki ────────────────
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+        }
+      }
+
+# Alloy default RBAC lacks nodes/proxy permission; must be added manually
+rbac:
+  create: true
+  clusterRules:
+    - apiGroups: [""]
+      resources: ["nodes/proxy"]
+      verbs: ["get"]
+
+controller:
+  type: daemonset
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
