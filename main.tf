@@ -404,6 +404,13 @@ resource "helm_release" "n8n" {
       existingSecret = var.n8n_secret_name
     }
 
+    # Additional env vars not covered by secretRefs
+    config = {
+      extraEnv = [
+        { name = "WEBHOOK_URL", value = "https://${var.n8n_host}/" },
+      ]
+    }
+
     # ClusterIP only — no OCI Load Balancer
     service = {
       type = "ClusterIP"
