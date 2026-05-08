@@ -1,6 +1,22 @@
 # Scripts
 
-Operational scripts for backup and restore. All scripts require `kubectl` with a valid kubeconfig pointing to the target OKE cluster.
+Operational scripts for backup, restore, and infrastructure lifecycle. All scripts that interact with Kubernetes require `kubectl` with a valid kubeconfig pointing to the target OKE cluster.
+
+## destroy.sh
+
+Safely tears down the infrastructure by removing in-cluster Kubernetes and Helm resources from Terraform state before running `terraform destroy`. This prevents two known failure modes:
+
+- `kubernetes_namespace_v1` stuck in **Terminating** because the NFS PVC holds a Kubernetes finalizer and `prevent_destroy = true` blocks Terraform from deleting it cleanly.
+- Helm/Kubernetes provider **context deadline exceeded** when the OKE API server becomes unreachable after nodes are terminated.
+
+OCI deletes all in-cluster resources (namespaces, PVCs, Deployments, Helm releases) automatically when the OKE cluster is destroyed — Terraform does not need to manage their individual deletion.
+
+**Requires**: `terraform`
+
+```bash
+bash scripts/destroy.sh               # interactive confirmation
+bash scripts/destroy.sh -auto-approve # non-interactive
+```
 
 ## backup-n8n.sh
 
