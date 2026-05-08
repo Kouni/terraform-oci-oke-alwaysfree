@@ -137,7 +137,10 @@ Back up n8n data before a full destroy:
 #    the random pod suffix added by the Helm-managed Deployment).
 ./scripts/backup-n8n.sh
 
-# 2. Destroy all resources (use the safe wrapper to avoid provider timeouts)
+# 2. Destroy all resources using the safe wrapper.
+#    This first deletes PVCs via kubectl (so the CSI driver can clean up
+#    the OCI Block Volume backing the NFS server), then removes helm/kubernetes
+#    resources from state, and finally runs terraform destroy.
 bash scripts/destroy.sh
 ```
 

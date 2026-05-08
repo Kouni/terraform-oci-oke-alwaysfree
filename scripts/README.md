@@ -4,9 +4,10 @@ Operational scripts for backup, restore, and infrastructure lifecycle. All scrip
 
 ## destroy.sh
 
-Safely tears down the infrastructure by removing in-cluster Kubernetes and Helm resources from Terraform state before running `terraform destroy`. This prevents a known failure mode:
+Safely tears down the infrastructure without leaving orphaned OCI Block Volumes. Handles two known failure modes:
 
-- Helm/Kubernetes provider **context deadline exceeded** when the OKE API server becomes unreachable after nodes are terminated.
+- **Orphaned OCI Block Volume**: The NFS server backing PVC is backed by an OCI Block Volume via the `oci-bv-xfs` StorageClass (`reclaimPolicy=Delete`). If nodes are terminated first, the CSI driver is killed before it can call the OCI API to delete the volume. This script deletes PVCs via `kubectl` first so the CSI driver can complete cleanup while nodes are still running.
+- **Provider timeout**: Helm/Kubernetes provider **context deadline exceeded** when the OKE API server becomes unreachable after nodes are terminated. Resolved by removing helm/kubernetes resources from state before OCI teardown.
 
 OCI deletes all in-cluster resources (namespaces, PVCs, Deployments, Helm releases) automatically when the OKE cluster is destroyed — Terraform does not need to manage their individual deletion.
 
