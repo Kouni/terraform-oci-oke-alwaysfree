@@ -7,15 +7,9 @@
 #   bash scripts/destroy.sh -auto-approve # non-interactive
 #
 # Why this script exists:
-#   terraform destroy can hang on Kubernetes resources for two reasons:
-#
-#   1. kubernetes_namespace_v1 gets stuck in Terminating because the NFS PVC
-#      inside it holds a Kubernetes finalizer, and prevent_destroy = true
-#      prevents Terraform from deleting the PVC cleanly.
-#
-#   2. The Helm/Kubernetes provider times out with "context deadline exceeded"
-#      when the OKE API server becomes unreachable mid-destroy (e.g. after
-#      nodes are terminated).
+#   terraform destroy can hang on Kubernetes resources because the
+#   Helm/Kubernetes provider times out with "context deadline exceeded" when
+#   the OKE API server becomes unreachable after nodes are terminated.
 #
 #   Since OCI destroys all in-cluster resources (namespaces, PVCs, Deployments,
 #   Helm releases) when the OKE cluster is deleted, Terraform does not need to

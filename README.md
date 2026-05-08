@@ -130,21 +130,16 @@ The Prometheus + Loki + Alloy stack documented under `docs/guides/observability.
 
 ## Backup & Disaster Recovery
 
-The n8n PVC uses `lifecycle { prevent_destroy = true }` to guard against accidental data loss. To perform a full `terraform destroy`:
+Back up n8n data before a full destroy:
 
 ```bash
-# 1. Back up n8n data first (uses label-based pod lookup; works for the
-#    Helm-managed Deployment regardless of the random pod suffix).
+# 1. Back up n8n data (uses label-based pod lookup; works regardless of
+#    the random pod suffix added by the Helm-managed Deployment).
 ./scripts/backup-n8n.sh
 
-# 2. Remove the PVC from Terraform state (does NOT delete the actual PVC)
-terraform state rm 'kubernetes_persistent_volume_claim_v1.n8n_data[0]'
-
-# 3. Destroy all resources
-terraform destroy
+# 2. Destroy all resources (use the safe wrapper to avoid provider timeouts)
+bash scripts/destroy.sh
 ```
-
-To recreate the cluster and reattach existing data, re-run `terraform apply` — the NFS provisioner will create a new backing volume and the n8n PVC will be re-provisioned.
 
 ## Prerequisites
 
