@@ -73,6 +73,37 @@ module "oke" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Node Readiness Gate
+# OKE marks the node pool resource complete before worker nodes finish their
+# cloud-init (oci-growfs + oke-init.sh) and register as Ready. Without this
+# gate, Helm releases time out waiting for pods that cannot be scheduled yet.
+# This local-exec generates a temporary kubeconfig and blocks until every node
+# in the pool reports Ready, then Helm deployments proceed in parallel.
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "terraform_data" "wait_for_nodes" {
+  depends_on = [module.oke]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${module.oke.cluster_id} \
+        --region ${split(".", module.oke.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP"
+      echo "Waiting for all nodes to become Ready (timeout 15 min)..."
+      KUBECONFIG="$KUBECONFIG_TMP" kubectl wait \
+        --for=condition=Ready node --all --timeout=900s
+      echo "All nodes Ready."
+    EOT
+  }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Cluster Add-ons (Helm)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -131,7 +162,7 @@ resource "helm_release" "metrics_server" {
   timeout         = 600
   cleanup_on_fail = true
 
-  depends_on = [module.oke]
+  depends_on = [terraform_data.wait_for_nodes]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -219,7 +250,7 @@ resource "helm_release" "nfs_server_provisioner" {
     ]
   })]
 
-  depends_on = [module.oke, kubernetes_storage_class_v1.oci_bv_xfs]
+  depends_on = [terraform_data.wait_for_nodes, kubernetes_storage_class_v1.oci_bv_xfs]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -540,5 +571,5 @@ resource "kubernetes_deployment_v1" "cloudflared" {
     }
   }
 
-  depends_on = [kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
+  depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
 }
