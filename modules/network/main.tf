@@ -1,3 +1,14 @@
+# Resolve the regional "All Services" bundle for use in security list rules and
+# the Service Gateway. This data source is evaluated at plan time and does not
+# create any resource.
+data "oci_core_services" "all" {
+  filter {
+    name   = "name"
+    values = ["All .* Services In Oracle Services Network"]
+    regex  = true
+  }
+}
+
 locals {
   # vcn_cidr is fixed because subnet CIDRs (10.0.0.0/28, 10.0.1.0/24, 10.0.2.0/24)
   # are hardcoded within this range. Do not parameterize.
@@ -6,6 +17,9 @@ locals {
   api_endpoint_subnet_cidr = "10.0.0.0/28"
   worker_subnet_cidr       = "10.0.1.0/24"
   lb_subnet_cidr           = "10.0.2.0/24"
+
+  all_services_cidr = data.oci_core_services.all.services[0].cidr_block
+  all_services_id   = data.oci_core_services.all.services[0].id
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -32,6 +46,32 @@ resource "oci_core_internet_gateway" "this" {
   enabled        = true
 
   freeform_tags = var.freeform_tags
+}
+
+# Service Gateway allows OCI-internal traffic (CCM, CSI, OKE management) to
+# reach Oracle Services Network without traversing the public internet.
+# OCI prohibits mixing IGW and SGW routes in the same public-subnet route
+# table, so no route rules reference this gateway — all subnets remain public
+# and route via IGW. The SGW must exist in the VCN for SERVICE_CIDR_BLOCK to
+# be valid as a security-list egress destination type (required by Oracle docs
+# for OKE to function; see modules/network/main.tf api_endpoint egress rules).
+resource "oci_core_service_gateway" "this" {
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.this.id
+  display_name   = "service-gateway"
+
+  services {
+    service_id = local.all_services_id
+  }
+
+  freeform_tags = var.freeform_tags
+
+  lifecycle {
+    precondition {
+      condition     = length(data.oci_core_services.all.services) > 0
+      error_message = "No OCI services found matching 'All * Services In Oracle Services Network'. Verify the OCI region supports Service Gateway."
+    }
+  }
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -158,6 +198,31 @@ resource "oci_core_security_list" "api_endpoint" {
     protocol         = "1" # ICMP
     destination      = local.worker_subnet_cidr
     destination_type = "CIDR_BLOCK"
+    stateless        = false
+
+    icmp_options {
+      type = 3
+      code = 4
+    }
+  }
+
+  # Required by Oracle: allow OKE control plane (VNIC in this subnet) to reach
+  # Oracle Services Network for CCM topology labeling and CSI volume management.
+  # Without this rule, the OKE migration service cannot call the OCI API and
+  # every node boots with last-migration-failure=get_kubesvc_failure, blocking
+  # all PVC provisioning. SERVICE_CIDR_BLOCK requires the Service Gateway to
+  # exist in the VCN (see oci_core_service_gateway.this above).
+  egress_security_rules {
+    protocol         = "6" # TCP
+    destination      = local.all_services_cidr
+    destination_type = "SERVICE_CIDR_BLOCK"
+    stateless        = false
+  }
+
+  egress_security_rules {
+    protocol         = "1" # ICMP
+    destination      = local.all_services_cidr
+    destination_type = "SERVICE_CIDR_BLOCK"
     stateless        = false
 
     icmp_options {
