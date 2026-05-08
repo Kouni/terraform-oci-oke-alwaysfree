@@ -9,54 +9,65 @@
 # Why this script exists:
 #   terraform destroy can fail or leave orphaned OCI resources for two reasons:
 #
-#   1. The OCI Block Volume backing the NFS server PVC is not deleted unless
-#      the Kubernetes CSI driver explicitly calls the OCI API. If we remove
-#      helm/kubernetes resources from state and then destroy the node pool,
-#      the CSI driver is killed with the nodes before it can clean up the
-#      block volume. This script deletes PVCs via kubectl first so the CSI
-#      driver can complete its cleanup while nodes are still running.
+#   1. The OCI Block Volume backing the NFS server PVC is orphaned if the
+#      CSI driver is killed before it can call the OCI API. The CSI driver's
+#      DeleteVolume is async — Helm uninstall reports "complete" once the k8s
+#      objects are marked for deletion, but the actual OCI API call may still
+#      be in-flight when the node pool is torn down and the CSI controller pod
+#      is killed. This script deletes namespaces via kubectl first, blocking
+#      until namespace deletion completes (which confirms the OCI volume was
+#      deleted), before the node pool is ever touched.
 #
 #   2. The Helm/Kubernetes provider times out with "context deadline exceeded"
 #      when the OKE API server becomes unreachable after nodes are terminated.
 #
-#   OCI destroys all remaining in-cluster resources (namespaces, Deployments,
-#   Helm releases) automatically when the OKE cluster is deleted. Terraform
-#   does not need to manage their deletion — only PVCs need explicit cleanup
-#   to trigger CSI block volume deletion.
-#
-# Requires: terraform, kubectl (for PVC cleanup)
+# Requires: terraform, kubectl
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-# ── Step 1: Delete PVCs so CSI driver cleans up OCI Block Volumes ─────────────
-# This MUST happen before state removal and cluster teardown. The oci-bv-xfs
-# StorageClass uses reclaimPolicy=Delete — the CSI driver calls the OCI API
-# to delete the backing block volume when the PVC is deleted. If the nodes
-# are gone first, that API call never happens and the volume is orphaned.
+# ── Step 1: Delete namespaces to ensure CSI cleans up OCI Block Volumes ───────
+# Deletion order matters:
+#
+#   a) n8n first: terminates the n8n pod, clears the pvc-protection finalizer
+#      on n8n-data, NFS provisioner (still running in nfs-storage) deletes the
+#      backing subdirectory, PVC is removed. No OCI Block Volume involved.
+#
+#   b) nfs-storage: terminates the NFS server pod, clears the pvc-protection
+#      finalizer on the backing PVC, the k8s reclaim controller invokes the
+#      CSI driver's DeleteVolume gRPC, CSI calls the OCI Block Volume API to
+#      delete the volume, CSI removes the PV finalizer, PV is deleted, namespace
+#      deletion completes. kubectl --wait=true blocks here, guaranteeing the
+#      OCI Block Volume is gone before we proceed to destroy the node pool.
+#
+#   c) tunnel: no backing OCI volumes, clean up while the API is reachable.
+#
+# If the cluster is unreachable, volumes must be deleted manually:
+#   oci bv volume delete --volume-id <id> --force
 
-echo "Deleting PVCs to let CSI driver clean up OCI Block Volumes..."
+echo "Deleting application namespaces (ensures CSI cleans up OCI Block Volumes)..."
 if kubectl get nodes &>/dev/null 2>&1; then
-  # Application PVCs first (backed by NFS subdirectory, not OCI directly)
-  kubectl delete pvc n8n-data -n n8n --ignore-not-found --wait=true --timeout=60s || true
-
-  # NFS server backing PVC — this is backed directly by an OCI Block Volume.
-  # Deleting it triggers the CSI driver to delete the block volume via OCI API.
-  kubectl delete pvc --all -n nfs-storage --ignore-not-found --wait=true --timeout=120s || true
-
-  echo "PVC cleanup complete."
+  kubectl delete namespace n8n       --ignore-not-found --wait=true --timeout=120s || true
+  kubectl delete namespace nfs-storage --ignore-not-found --wait=true --timeout=180s || true
+  kubectl delete namespace tunnel    --ignore-not-found --wait=true --timeout=60s  || true
+  echo "Namespace cleanup complete."
 else
-  echo "Cluster not reachable — skipping PVC cleanup (block volumes may need manual deletion)."
+  echo "Cluster not reachable — skipping cleanup."
+  echo "Orphaned OCI Block Volumes must be deleted manually:"
+  echo "  oci bv volume list --compartment-id <tenancy-ocid> | grep csi-"
+  echo "  oci bv volume delete --volume-id <id> --force"
 fi
 
 echo ""
 
 # ── Step 2: Remove in-cluster resources from state ────────────────────────────
+# Namespaces and their contents are already gone; removing from state so
+# terraform destroy does not try to contact a dead API server for them.
 
 echo "Removing in-cluster resources from Terraform state..."
-echo "(OKE cluster deletion removes all remaining Kubernetes resources automatically)"
+echo "(OKE cluster deletion removes any remaining Kubernetes resources automatically)"
 echo ""
 
 removed=0

@@ -6,7 +6,7 @@ Operational scripts for backup, restore, and infrastructure lifecycle. All scrip
 
 Safely tears down the infrastructure without leaving orphaned OCI Block Volumes. Handles two known failure modes:
 
-- **Orphaned OCI Block Volume**: The NFS server backing PVC is backed by an OCI Block Volume via the `oci-bv-xfs` StorageClass (`reclaimPolicy=Delete`). If nodes are terminated first, the CSI driver is killed before it can call the OCI API to delete the volume. This script deletes PVCs via `kubectl` first so the CSI driver can complete cleanup while nodes are still running.
+- **Orphaned OCI Block Volume**: Helm uninstall reports completion once Kubernetes objects are marked for deletion, but the CSI driver's `DeleteVolume` OCI API call is still in-flight. If the node pool is destroyed immediately after, the CSI controller pod is killed and the OCI Block Volume is never deleted. This script first deletes namespaces via `kubectl --wait=true`, which blocks until namespace deletion is fully complete (confirming the OCI volume deletion), before the node pool is touched.
 - **Provider timeout**: Helm/Kubernetes provider **context deadline exceeded** when the OKE API server becomes unreachable after nodes are terminated. Resolved by removing helm/kubernetes resources from state before OCI teardown.
 
 OCI deletes all in-cluster resources (namespaces, PVCs, Deployments, Helm releases) automatically when the OKE cluster is destroyed — Terraform does not need to manage their individual deletion.
