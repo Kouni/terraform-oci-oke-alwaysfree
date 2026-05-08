@@ -110,6 +110,29 @@ resource "oci_containerengine_node_pool" "this" {
     boot_volume_size_in_gbs = var.boot_volume_size_in_gbs
   }
 
+  # Cloud-init: expand root LV to fill the full boot volume before OKE bootstrap.
+  # The OKE platform image allocates only ~45 GB of raw disk to the LVM PV (sda3),
+  # leaving unallocated space even on a 64 GB volume. oci-growfs extends the
+  # partition, resizes the PV, extends ocivolume-root, and grows the XFS filesystem
+  # online — all before kubelet starts pulling images into /var/lib/containerd.
+  # Reference: Oracle Cloud Infrastructure docs, "Using Custom Cloud-init Scripts",
+  # Example 5 (https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengusingcustomcloudinitscripts.htm)
+  #
+  # NOTE: Changing node_metadata on an existing node pool does not replace running
+  # nodes. New nodes created after apply (or after manual node cycling) will pick
+  # up the expanded disk automatically.
+  node_metadata = var.node_disk_expansion_enabled ? {
+    user_data = base64encode(<<-EOT
+      #!/bin/bash
+      curl --fail -H "Authorization: Bearer Oracle" -L0 \
+        http://169.254.169.254/opc/v2/instance/metadata/oke_init_script \
+        | base64 --decode > /var/run/oke-init.sh
+      bash /usr/libexec/oci-growfs -y
+      bash /var/run/oke-init.sh
+    EOT
+    )
+  } : {}
+
   node_config_details {
     size = var.node_count
 
