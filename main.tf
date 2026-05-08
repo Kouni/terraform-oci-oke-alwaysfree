@@ -331,8 +331,6 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
   }
 
   lifecycle {
-    # Prevent accidental data loss — must be manually removed from state before destroy.
-    prevent_destroy = true
     # Ignore only the fields the controller mutates after binding so legitimate
     # in-place changes (e.g. requests.storage when expanding) are not silently
     # dropped by Terraform.

@@ -4,9 +4,8 @@ Operational scripts for backup, restore, and infrastructure lifecycle. All scrip
 
 ## destroy.sh
 
-Safely tears down the infrastructure by removing in-cluster Kubernetes and Helm resources from Terraform state before running `terraform destroy`. This prevents two known failure modes:
+Safely tears down the infrastructure by removing in-cluster Kubernetes and Helm resources from Terraform state before running `terraform destroy`. This prevents a known failure mode:
 
-- `kubernetes_namespace_v1` stuck in **Terminating** because the NFS PVC holds a Kubernetes finalizer and `prevent_destroy = true` blocks Terraform from deleting it cleanly.
 - Helm/Kubernetes provider **context deadline exceeded** when the OKE API server becomes unreachable after nodes are terminated.
 
 OCI deletes all in-cluster resources (namespaces, PVCs, Deployments, Helm releases) automatically when the OKE cluster is destroyed — Terraform does not need to manage their individual deletion.
