@@ -85,20 +85,82 @@ resource "terraform_data" "wait_for_nodes" {
   depends_on = [module.oke]
 
   provisioner "local-exec" {
-    command = <<-EOT
-      set -e
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
       KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
       trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+
+      REGION="${split(".", module.oke.cluster_id)[3]}"
+
       oci ce cluster create-kubeconfig \
         --cluster-id ${module.oke.cluster_id} \
-        --region ${split(".", module.oke.cluster_id)[3]} \
+        --region "$REGION" \
         --token-version 2.0.0 \
         --kube-endpoint PUBLIC_ENDPOINT \
         --file "$KUBECONFIG_TMP"
+
+      export KUBECONFIG="$KUBECONFIG_TMP"
+
       echo "Waiting for all nodes to become Ready (timeout 15 min)..."
-      KUBECONFIG="$KUBECONFIG_TMP" kubectl wait \
-        --for=condition=Ready node --all --timeout=900s
+      kubectl wait --for=condition=Ready node --all --timeout=900s
       echo "All nodes Ready."
+
+      # ── OKE CCM Topology Label Fallback ─────────────────────────────────────
+      # OKE's Cloud Controller Manager must add topology labels and remove the
+      # node.cloudprovider.kubernetes.io/uninitialized taint after each node
+      # boots. When OKE internal migration fails (symptom: node label
+      # last-migration-failure=get_kubesvc_failure), CCM never patches the node,
+      # causing the csi-oci-node DaemonSet to crash and blocking all PVC
+      # provisioning. This loop detects missing topology labels and applies them
+      # directly from OCI instance metadata as a deterministic fallback.
+      echo "Checking OKE CCM topology labels on all nodes..."
+      for NODE_NAME in $(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+        ZONE=$(kubectl get node "$NODE_NAME" \
+          -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}' 2>/dev/null || true)
+        if [ -n "$ZONE" ]; then
+          echo "  $NODE_NAME: zone=$ZONE — OK"
+          continue
+        fi
+        echo "  $NODE_NAME: topology labels absent — querying OCI instance metadata..."
+        PROVIDER_ID=$(kubectl get node "$NODE_NAME" -o jsonpath='{.spec.providerID}')
+        INSTANCE_OCID="$${PROVIDER_ID#oci://}"
+        AD=$(oci compute instance get \
+          --instance-id "$INSTANCE_OCID" --region "$REGION" \
+          --query 'data."availability-domain"' --raw-output)
+        FD=$(oci compute instance get \
+          --instance-id "$INSTANCE_OCID" --region "$REGION" \
+          --query 'data."fault-domain"' --raw-output)
+        # Strip tenancy hash prefix (e.g. "SBLv:AP-TOKYO-1-AD-1" -> "AP-TOKYO-1-AD-1")
+        AD_LABEL="$${AD#*:}"
+        kubectl label node "$NODE_NAME" \
+          "topology.kubernetes.io/zone=$AD_LABEL" \
+          "topology.kubernetes.io/region=$REGION" \
+          "failure-domain.beta.kubernetes.io/zone=$AD_LABEL" \
+          "failure-domain.beta.kubernetes.io/region=$REGION" \
+          "oci.oraclecloud.com/fault-domain=$FD" \
+          --overwrite
+        kubectl annotate node "$NODE_NAME" \
+          "node.info/availability-domain=$AD" \
+          "oci.oraclecloud.com/availability-domain=$AD" \
+          --overwrite
+        kubectl taint node "$NODE_NAME" \
+          "node.cloudprovider.kubernetes.io/uninitialized=true:NoSchedule-" 2>/dev/null || true
+        echo "  $NODE_NAME patched: zone=$AD_LABEL region=$REGION fault-domain=$FD"
+      done
+
+      # ── CSI Node Plugin Health Check ─────────────────────────────────────────
+      # After topology label patching, the csi-oci-node DaemonSet may need a
+      # restart to re-read node annotations. Verify readiness before Helm
+      # releases proceed; trigger a rollout only if the pod is not yet healthy.
+      echo "Waiting for csi-oci-node DaemonSet..."
+      if ! kubectl rollout status daemonset/csi-oci-node \
+           -n kube-system --timeout=60s 2>/dev/null; then
+        echo "  csi-oci-node not yet Ready — restarting DaemonSet..."
+        kubectl rollout restart daemonset/csi-oci-node -n kube-system
+      fi
+      kubectl rollout status daemonset/csi-oci-node -n kube-system --timeout=120s
+      echo "CSI node plugin Ready — proceeding with Helm releases."
     EOT
   }
 }
