@@ -190,23 +190,86 @@ resource "kubernetes_storage_class_v1" "oci_bv_xfs" {
   }
 }
 
+# Namespace is managed explicitly so that Terraform controls its lifecycle.
+# The Helm release sets create_namespace = false and depends on this resource,
+# which guarantees the namespace exists before chart installation and — crucially —
+# is NOT deleted until after the Helm release is fully destroyed.
+resource "kubernetes_namespace_v1" "nfs_storage" {
+  count = var.enable_nfs_storage ? 1 : 0
+
+  metadata {
+    name = "nfs-storage"
+  }
+
+  depends_on = [terraform_data.wait_for_nodes]
+}
+
+# Explicit Terraform-managed PVC for the NFS server's backing OCI Block Volume.
+#
+# Why explicit rather than letting the Helm chart create it:
+# The Helm chart uses a StatefulSet volumeClaimTemplate, which creates a PVC that
+# Terraform has no visibility into. On destroy, Helm uninstall signals Kubernetes
+# to delete the StatefulSet but returns immediately — the CSI driver's DeleteVolume
+# gRPC call (which deletes the OCI Block Volume via OCI API) is still in-flight.
+# Terraform then destroys the node pool, killing the CSI controller pod, aborting
+# the API call, and leaving a 136 GB orphaned OCI Block Volume.
+#
+# With an explicit PVC, Terraform's kubernetes provider destroy BLOCKS until the
+# PVC object is fully removed from the API server — which only happens after the
+# CSI driver confirms the OCI Block Volume is deleted. This guarantees no orphans.
+#
+# Destroy order enforced by depends_on on the Helm release:
+#   helm_release.nfs_server_provisioner  (Helm uninstall: NFS pod stops,
+#     ↓                                   pvc-protection finalizer clears)
+#   kubernetes_persistent_volume_claim_v1.nfs_backing  (Terraform blocks ~30s
+#     ↓                                                 until OCI volume deleted)
+#   module.oke (node pool)               (OCI Block Volume is already gone)
+resource "kubernetes_persistent_volume_claim_v1" "nfs_backing" {
+  count = var.enable_nfs_storage ? 1 : 0
+
+  metadata {
+    name      = "nfs-backing"
+    namespace = "nfs-storage"
+  }
+
+  spec {
+    access_modes       = ["ReadWriteOnce"]
+    storage_class_name = "oci-bv-xfs"
+    resources {
+      requests = {
+        storage = "${var.nfs_volume_size_in_gbs}Gi"
+      }
+    }
+  }
+
+  # WaitForFirstConsumer: the PVC stays Pending until the NFS server pod is
+  # scheduled to a node. Do not block apply waiting for binding — the Helm
+  # release below will trigger the scheduling that causes the bind.
+  wait_until_bound = false
+
+  depends_on = [
+    kubernetes_namespace_v1.nfs_storage,
+    kubernetes_storage_class_v1.oci_bv_xfs,
+  ]
+}
+
 resource "helm_release" "nfs_server_provisioner" {
   count = var.enable_nfs_storage ? 1 : 0
 
-  name             = "nfs-server-provisioner"
-  repository       = null
-  chart            = "${path.module}/charts"
-  namespace        = "nfs-storage"
-  create_namespace = true
+  name       = "nfs-server-provisioner"
+  repository = null
+  chart      = "${path.module}/charts"
+  namespace  = "nfs-storage"
+  # Namespace lifecycle is owned by kubernetes_namespace_v1.nfs_storage above.
+  create_namespace = false
 
   timeout         = 900
   cleanup_on_fail = true
 
   values = [yamlencode({
     persistence = {
-      enabled      = true
-      storageClass = "oci-bv-xfs"
-      size         = "${var.nfs_volume_size_in_gbs}Gi"
+      enabled       = true
+      existingClaim = "nfs-backing"
     }
     storageClass = {
       name         = "nfs"
@@ -250,7 +313,15 @@ resource "helm_release" "nfs_server_provisioner" {
     ]
   })]
 
-  depends_on = [terraform_data.wait_for_nodes, kubernetes_storage_class_v1.oci_bv_xfs]
+  # depends_on on the PVC (not just storage_class) is the key to correct destroy
+  # ordering: Helm release is destroyed first (stops the NFS pod so
+  # pvc-protection finalizer clears), then the PVC resource is destroyed (Terraform
+  # blocks until CSI confirms the OCI Block Volume is deleted), and only then does
+  # Terraform proceed to destroy the node pool.
+  depends_on = [
+    terraform_data.wait_for_nodes,
+    kubernetes_persistent_volume_claim_v1.nfs_backing,
+  ]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
