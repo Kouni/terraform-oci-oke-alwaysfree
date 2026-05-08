@@ -25,11 +25,16 @@ output "nfs_storage_class" {
 
 output "budget_id" {
   description = "The OCID of the budget (null if budget alert is disabled)"
-  value       = var.enable_budget_alert ? module.budget[0].budget_id : null
+  value       = one(module.budget[*].budget_id)
 }
 
 output "n8n_namespace" {
   description = "Kubernetes namespace for n8n (always created; PVC and namespace persist even when enable_n8n = false)"
-  value       = kubernetes_namespace_v1.n8n.metadata[0].name
+  value       = var.n8n_namespace
+}
+
+output "node_pool_id" {
+  description = "The OCID of the OKE node pool"
+  value       = module.oke.node_pool_id
 }
 

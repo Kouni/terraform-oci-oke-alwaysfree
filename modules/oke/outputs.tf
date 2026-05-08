@@ -4,8 +4,13 @@ output "cluster_id" {
 }
 
 output "cluster_endpoint" {
-  description = "The Kubernetes API endpoint of the OKE cluster"
-  value       = "https://${try(oci_containerengine_cluster.this.endpoints[0].public_endpoint, "")}"
+  description = "The Kubernetes API endpoint of the OKE cluster (null if endpoint is not yet available)"
+  value       = try("https://${oci_containerengine_cluster.this.endpoints[0].public_endpoint}", null)
+}
+
+output "node_pool_id" {
+  description = "The OCID of the OKE node pool"
+  value       = oci_containerengine_node_pool.this.id
 }
 
 output "kubeconfig_command" {
