@@ -23,6 +23,11 @@ compartment_ocid = "ocid1.tenancy.oc1..example"  # Use tenancy OCID for root com
 # node_memory_in_gbs      = 24
 # boot_volume_size_in_gbs = 64
 # ssh_public_key          = "ssh-rsa AAAA..."
+#
+# Boot volume expansion: OKE Oracle Linux 8 images allocate only ~45 GB of raw
+# disk to LVM by default. oci-growfs fills the gap at first boot so
+# /var/lib/containerd has the full volume available (enabled by default).
+# node_disk_expansion_enabled = true
 
 # ──────────────── Budget Alert ────────────────
 # enable_budget_alert = true

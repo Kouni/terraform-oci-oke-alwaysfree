@@ -122,6 +122,12 @@ variable "ssh_public_key" {
   default     = null
 }
 
+variable "node_disk_expansion_enabled" {
+  description = "Automatically expand the boot volume root LV to fill the full allocated size at first boot. Uses oci-growfs (Oracle Linux built-in) via cloud-init, run before oke-init.sh so kubelet starts with the expanded filesystem. Required when boot_volume_size_in_gbs > 50 (the OKE image default only uses ~45 GB of raw disk for LVM). Set false only if supplying a custom cloud-init that handles disk growth itself."
+  type        = bool
+  default     = true
+}
+
 # Budget alert
 
 variable "enable_budget_alert" {
