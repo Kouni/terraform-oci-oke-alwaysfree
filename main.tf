@@ -682,7 +682,7 @@ resource "helm_release" "tailscale_operator" {
       image = {
         repository = "docker.io/tailscale/k8s-operator"
       }
-      defaultTags = ["tag:k8s"]
+      defaultTags = ["tag:k8s-operator"]
     }
     proxyConfig = {
       image = {
@@ -738,6 +738,8 @@ metadata:
   name: ${local.tailscale_hostname}
 spec:
   hostname: ${local.tailscale_hostname}
+  tags:
+    - tag:k8s-operator
   exitNode: true
   subnetRouter:
     advertiseRoutes:
