@@ -13,6 +13,8 @@ locals {
   total_memory_in_gbs       = var.node_count * var.node_memory_in_gbs
   total_boot_volume_in_gbs  = var.node_count * var.boot_volume_size_in_gbs
   total_block_volume_in_gbs = local.total_boot_volume_in_gbs + (var.enable_nfs_storage ? var.nfs_volume_size_in_gbs : 0)
+
+  tailscale_hostname = coalesce(var.tailscale_hostname, var.cluster_name)
 }
 
 # Always Free safety checks
@@ -374,6 +376,15 @@ resource "kubernetes_namespace_v1" "tunnel" {
   }
 }
 
+resource "kubernetes_namespace_v1" "tailscale" {
+  metadata {
+    name = var.tailscale_namespace
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+    }
+  }
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Persistent Volume Claims
 # These are intentionally NOT gated on enable_n8n so that disabling the feature
@@ -641,4 +652,103 @@ resource "kubernetes_deployment_v1" "cloudflared" {
   }
 
   depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tailscale Exit Node + Subnet Router
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "helm_release" "tailscale_operator" {
+  count = var.enable_tailscale ? 1 : 0
+
+  name             = "tailscale-operator"
+  repository       = "https://pkgs.tailscale.com/helmcharts"
+  chart            = "tailscale-operator"
+  version          = var.tailscale_operator_chart_version
+  namespace        = var.tailscale_namespace
+  create_namespace = false
+
+  timeout         = 600
+  cleanup_on_fail = true
+
+  values = [sensitive(yamlencode({
+    oauth = {
+      clientId     = var.tailscale_oauth_client_id
+      clientSecret = var.tailscale_oauth_client_secret
+    }
+  }))]
+
+  depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tailscale]
+
+  lifecycle {
+    precondition {
+      condition     = var.tailscale_oauth_client_id != null
+      error_message = "tailscale_oauth_client_id is required when enable_tailscale is true. Create an OAuth client at Tailscale Admin → Settings → OAuth Clients."
+    }
+    precondition {
+      condition     = var.tailscale_oauth_client_secret != null
+      error_message = "tailscale_oauth_client_secret is required when enable_tailscale is true."
+    }
+  }
+}
+
+# The Connector CRD is installed by the Helm release above. Using local-exec
+# (rather than kubernetes_manifest) avoids plan-time CRD validation failures
+# when the operator has not yet been installed.
+#
+# triggers_replace causes Terraform to re-apply the Connector whenever the
+# hostname or advertised routes change, so drift is corrected automatically.
+resource "terraform_data" "tailscale_connector" {
+  count = var.enable_tailscale ? 1 : 0
+
+  triggers_replace = {
+    hostname         = local.tailscale_hostname
+    advertise_routes = join(",", sort(var.tailscale_advertise_routes))
+    cluster_id       = module.oke.cluster_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${module.oke.cluster_id} \
+        --region ${split(".", module.oke.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP"
+      kubectl --kubeconfig "$KUBECONFIG_TMP" apply -f - <<YAML
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: ${local.tailscale_hostname}
+spec:
+  hostname: ${local.tailscale_hostname}
+  exitNode: true
+  subnetRouter:
+    advertiseRoutes:
+${join("\n", [for r in var.tailscale_advertise_routes : "      - \"${r}\""])}
+YAML
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${self.triggers_replace.cluster_id} \
+        --region ${split(".", self.triggers_replace.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP" 2>/dev/null || true
+      kubectl --kubeconfig "$KUBECONFIG_TMP" \
+        delete connector ${self.triggers_replace.hostname} --ignore-not-found 2>/dev/null || true
+    EOT
+  }
+
+  depends_on = [helm_release.tailscale_operator]
 }

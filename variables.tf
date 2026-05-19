@@ -273,3 +273,49 @@ variable "cloudflare_tunnel_namespace" {
   type        = string
   default     = "tunnel"
 }
+
+# ──────────────── Tailscale Exit Node ────────────────
+
+variable "enable_tailscale" {
+  description = "Deploy Tailscale Kubernetes Operator as an exit node and subnet router for the VCN"
+  type        = bool
+  default     = false
+}
+
+variable "tailscale_namespace" {
+  description = "Kubernetes namespace for the Tailscale Operator"
+  type        = string
+  default     = "tailscale"
+}
+
+variable "tailscale_operator_chart_version" {
+  description = "Tailscale Operator Helm chart version. If null, uses the latest available version — pin a specific version for reproducible deployments"
+  type        = string
+  default     = null
+}
+
+variable "tailscale_oauth_client_id" {
+  description = "Tailscale OAuth client ID. Create at Tailscale Admin → Settings → OAuth Clients. Required when enable_tailscale is true"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "tailscale_oauth_client_secret" {
+  description = "Tailscale OAuth client secret. Required when enable_tailscale is true"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "tailscale_hostname" {
+  description = "Hostname registered in the Tailscale admin console for this connector. Defaults to cluster_name when null"
+  type        = string
+  default     = null
+}
+
+variable "tailscale_advertise_routes" {
+  description = "CIDR blocks to advertise via the Tailscale subnet router. Defaults to the full VCN CIDR to expose all subnets"
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
+}
