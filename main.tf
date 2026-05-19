@@ -676,6 +676,19 @@ resource "helm_release" "tailscale_operator" {
       clientId     = var.tailscale_oauth_client_id
       clientSecret = var.tailscale_oauth_client_secret
     }
+    # OKE uses CRI-O which enforces fully-qualified image names.
+    # Without the registry prefix, CRI-O rejects "short name" images.
+    operatorConfig = {
+      image = {
+        repository = "docker.io/tailscale/k8s-operator"
+      }
+      defaultTags = ["tag:k8s"]
+    }
+    proxyConfig = {
+      image = {
+        repository = "docker.io/tailscale/tailscale"
+      }
+    }
   }))]
 
   depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tailscale]
