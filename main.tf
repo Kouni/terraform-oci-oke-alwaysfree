@@ -723,6 +723,9 @@ resource "terraform_data" "tailscale_connector" {
   }
 
   provisioner "local-exec" {
+    # yamlencode() is used to produce the Connector manifest so that all
+    # variable values (tags, routes, hostname) are properly YAML-escaped,
+    # preventing injection via newlines or special characters in user inputs.
     command = <<-EOT
       set -e
       KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
@@ -738,25 +741,28 @@ resource "terraform_data" "tailscale_connector" {
         crd/connectors.tailscale.com \
         --timeout=120s
       kubectl --kubeconfig "$KUBECONFIG_TMP" apply -f - <<YAML
-apiVersion: tailscale.com/v1alpha1
-kind: Connector
-metadata:
-  name: ${local.tailscale_hostname}
-spec:
-  hostname: ${local.tailscale_hostname}
-  tags:
-${join("\n", [for t in var.tailscale_tags : "    - ${t}"])}
-  exitNode: true
-  subnetRouter:
-    advertiseRoutes:
-${join("\n", [for r in var.tailscale_advertise_routes : "      - \"${r}\""])}
+${yamlencode({
+    apiVersion = "tailscale.com/v1alpha1"
+    kind       = "Connector"
+    metadata = {
+      name = local.tailscale_hostname
+    }
+    spec = {
+      hostname = local.tailscale_hostname
+      tags     = var.tailscale_tags
+      exitNode = true
+      subnetRouter = {
+        advertiseRoutes = var.tailscale_advertise_routes
+      }
+    }
+})}
 YAML
     EOT
-  }
+}
 
-  provisioner "local-exec" {
-    when    = destroy
-    command = <<-EOT
+provisioner "local-exec" {
+  when    = destroy
+  command = <<-EOT
       set -e
       KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
       trap 'rm -f "$KUBECONFIG_TMP"' EXIT
@@ -769,14 +775,14 @@ YAML
       kubectl --kubeconfig "$KUBECONFIG_TMP" \
         delete connector ${self.triggers_replace.hostname} --ignore-not-found 2>/dev/null || true
     EOT
-  }
+}
 
-  depends_on = [helm_release.tailscale_operator]
+depends_on = [helm_release.tailscale_operator]
 
-  lifecycle {
-    precondition {
-      condition     = can(regex("^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?$", local.tailscale_hostname))
-      error_message = "The derived Tailscale hostname \"${local.tailscale_hostname}\" is not a valid DNS label. Set tailscale_hostname explicitly or ensure cluster_name uses only lowercase letters, digits, and hyphens."
-    }
+lifecycle {
+  precondition {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?$", local.tailscale_hostname))
+    error_message = "The derived Tailscale hostname \"${local.tailscale_hostname}\" is not a valid DNS label. Set tailscale_hostname explicitly or ensure cluster_name uses only lowercase letters, digits, and hyphens."
   }
+}
 }
