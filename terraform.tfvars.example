@@ -82,7 +82,7 @@ notification_email    = "you@example.com"
 # ──────────────── Tailscale Exit Node + Subnet Router ────────────────
 # Prerequisites:
 #   1. Create OAuth Client: https://login.tailscale.com/admin/settings/oauth
-#      Required scopes: devices:core:write, auth_keys (write)
+#      Required scopes: devices (or devices:core:write), auth_keys
 #   2. Copy clientId and clientSecret into tailscale_oauth_client_id / tailscale_oauth_client_secret
 #   3. After apply, approve exit node and subnet routes in Tailscale Admin:
 #      Machines → click node → Edit route settings → approve routes

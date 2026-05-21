@@ -377,6 +377,7 @@ resource "kubernetes_namespace_v1" "tunnel" {
 }
 
 resource "kubernetes_namespace_v1" "tailscale" {
+  count = var.enable_tailscale ? 1 : 0
   metadata {
     name = var.tailscale_namespace
     labels = {
@@ -691,7 +692,7 @@ resource "helm_release" "tailscale_operator" {
     }
   }))]
 
-  depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tailscale]
+  depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tailscale[0]]
 
   lifecycle {
     precondition {
