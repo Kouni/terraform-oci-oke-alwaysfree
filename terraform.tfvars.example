@@ -90,7 +90,8 @@ notification_email    = "you@example.com"
 # enable_tailscale                  = false
 # tailscale_namespace               = "tailscale"
 # tailscale_operator_chart_version  = null  # null = latest; pin with e.g. "1.82.0"
-# tailscale_hostname                = null  # null = cluster_name; e.g. "formosa-oci"
+# tailscale_tags                    = ["tag:k8s-operator"]  # must match tagOwners in your tailnet ACL
+# tailscale_hostname                = null  # null = cluster_name; e.g. "formosa-oci" (DNS label: lowercase, hyphens, max 63 chars)
 # tailscale_advertise_routes        = ["10.0.0.0/16"]  # full VCN CIDR; narrow if needed
 # tailscale_oauth_client_id         = "tskey-client-xx..."  # sensitive — do not commit
 # tailscale_oauth_client_secret     = "tskey-client-secret-xx..."  # sensitive — do not commit

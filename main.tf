@@ -683,7 +683,7 @@ resource "helm_release" "tailscale_operator" {
       image = {
         repository = "docker.io/tailscale/k8s-operator"
       }
-      defaultTags = ["tag:k8s-operator"]
+      defaultTags = var.tailscale_tags
     }
     proxyConfig = {
       image = {
@@ -696,12 +696,12 @@ resource "helm_release" "tailscale_operator" {
 
   lifecycle {
     precondition {
-      condition     = var.tailscale_oauth_client_id != null
-      error_message = "tailscale_oauth_client_id is required when enable_tailscale is true. Create an OAuth client at Tailscale Admin → Settings → OAuth Clients."
+      condition     = var.tailscale_oauth_client_id != null && var.tailscale_oauth_client_id != ""
+      error_message = "tailscale_oauth_client_id is required and must be non-empty when enable_tailscale is true. Create an OAuth client at Tailscale Admin → Settings → OAuth Clients."
     }
     precondition {
-      condition     = var.tailscale_oauth_client_secret != null
-      error_message = "tailscale_oauth_client_secret is required when enable_tailscale is true."
+      condition     = var.tailscale_oauth_client_secret != null && var.tailscale_oauth_client_secret != ""
+      error_message = "tailscale_oauth_client_secret is required and must be non-empty when enable_tailscale is true."
     }
   }
 }
@@ -718,6 +718,7 @@ resource "terraform_data" "tailscale_connector" {
   triggers_replace = {
     hostname         = local.tailscale_hostname
     advertise_routes = join(",", sort(var.tailscale_advertise_routes))
+    tags             = join(",", sort(var.tailscale_tags))
     cluster_id       = module.oke.cluster_id
   }
 
@@ -732,6 +733,10 @@ resource "terraform_data" "tailscale_connector" {
         --token-version 2.0.0 \
         --kube-endpoint PUBLIC_ENDPOINT \
         --file "$KUBECONFIG_TMP"
+      kubectl --kubeconfig "$KUBECONFIG_TMP" \
+        wait --for=condition=Established \
+        crd/connectors.tailscale.com \
+        --timeout=120s
       kubectl --kubeconfig "$KUBECONFIG_TMP" apply -f - <<YAML
 apiVersion: tailscale.com/v1alpha1
 kind: Connector
@@ -740,7 +745,7 @@ metadata:
 spec:
   hostname: ${local.tailscale_hostname}
   tags:
-    - tag:k8s-operator
+${join("\n", [for t in var.tailscale_tags : "    - ${t}"])}
   exitNode: true
   subnetRouter:
     advertiseRoutes:
@@ -767,4 +772,11 @@ YAML
   }
 
   depends_on = [helm_release.tailscale_operator]
+
+  lifecycle {
+    precondition {
+      condition     = can(regex("^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?$", local.tailscale_hostname))
+      error_message = "The derived Tailscale hostname \"${local.tailscale_hostname}\" is not a valid DNS label. Set tailscale_hostname explicitly or ensure cluster_name uses only lowercase letters, digits, and hyphens."
+    }
+  }
 }
