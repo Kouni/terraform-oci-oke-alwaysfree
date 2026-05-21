@@ -254,6 +254,19 @@ variable "n8n_image_tag" {
   default     = "latest"
 }
 
+variable "n8n_registry_username" {
+  description = "Docker Hub username for pulling n8n image. When set together with n8n_registry_password, an imagePullSecret is created to avoid anonymous pull rate limits. Leave empty to use anonymous access"
+  type        = string
+  default     = ""
+}
+
+variable "n8n_registry_password" {
+  description = "Docker Hub Personal Access Token (read-only scope) for pulling n8n image. Sensitive — store in terraform.tfvars only (gitignored)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "cloudflared_image_tag" {
   description = "cloudflared container image tag (e.g. '2025.4.1'). Defaults to 'latest' — pin a specific version for reproducible deployments"
   type        = string

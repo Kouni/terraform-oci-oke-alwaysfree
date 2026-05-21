@@ -457,6 +457,30 @@ resource "kubernetes_secret_v1" "n8n_secrets" {
   }
 }
 
+resource "kubernetes_secret_v1" "n8n_registry_creds" {
+  count = var.enable_n8n && var.n8n_registry_username != "" && var.n8n_registry_password != "" ? 1 : 0
+
+  metadata {
+    name      = "n8n-registry-creds"
+    namespace = kubernetes_namespace_v1.n8n.metadata[0].name
+  }
+
+  type = "kubernetes.io/dockerconfigjson"
+
+  data = {
+    ".dockerconfigjson" = jsonencode({
+      auths = {
+        "docker.n8n.io" = {
+          username = var.n8n_registry_username
+          password = var.n8n_registry_password
+          auth     = base64encode("${var.n8n_registry_username}:${var.n8n_registry_password}")
+        }
+      }
+    })
+  }
+}
+
+
 resource "kubernetes_secret_v1" "cloudflare_tunnel" {
   count = var.enable_cloudflare_tunnel ? 1 : 0
 
@@ -567,6 +591,23 @@ resource "helm_release" "n8n" {
   }
 }
 
+# Patch the n8n ServiceAccount to include imagePullSecrets so every pod automatically
+# inherits registry credentials without requiring chart support for this field.
+resource "terraform_data" "n8n_sa_image_pull_secret" {
+  count = var.enable_n8n && var.n8n_registry_username != "" && var.n8n_registry_password != "" ? 1 : 0
+
+  triggers_replace = [kubernetes_secret_v1.n8n_registry_creds[0].metadata[0].name]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl patch serviceaccount n8n \
+        --namespace ${var.n8n_namespace} \
+        --patch '{"imagePullSecrets":[{"name":"n8n-registry-creds"}]}'
+    EOT
+  }
+
+  depends_on = [helm_release.n8n, kubernetes_secret_v1.n8n_registry_creds]
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Cloudflare Tunnel
