@@ -13,6 +13,8 @@ locals {
   total_memory_in_gbs       = var.node_count * var.node_memory_in_gbs
   total_boot_volume_in_gbs  = var.node_count * var.boot_volume_size_in_gbs
   total_block_volume_in_gbs = local.total_boot_volume_in_gbs + (var.enable_nfs_storage ? var.nfs_volume_size_in_gbs : 0)
+
+  tailscale_hostname = coalesce(var.tailscale_hostname, var.cluster_name)
 }
 
 # Always Free safety checks
@@ -374,6 +376,16 @@ resource "kubernetes_namespace_v1" "tunnel" {
   }
 }
 
+resource "kubernetes_namespace_v1" "tailscale" {
+  count = var.enable_tailscale ? 1 : 0
+  metadata {
+    name = var.tailscale_namespace
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+    }
+  }
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Persistent Volume Claims
 # These are intentionally NOT gated on enable_n8n so that disabling the feature
@@ -641,4 +653,136 @@ resource "kubernetes_deployment_v1" "cloudflared" {
   }
 
   depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tunnel, kubernetes_secret_v1.cloudflare_tunnel]
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tailscale Exit Node + Subnet Router
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "helm_release" "tailscale_operator" {
+  count = var.enable_tailscale ? 1 : 0
+
+  name             = "tailscale-operator"
+  repository       = "https://pkgs.tailscale.com/helmcharts"
+  chart            = "tailscale-operator"
+  version          = var.tailscale_operator_chart_version
+  namespace        = var.tailscale_namespace
+  create_namespace = false
+
+  timeout         = 600
+  cleanup_on_fail = true
+
+  values = [sensitive(yamlencode({
+    oauth = {
+      clientId     = var.tailscale_oauth_client_id
+      clientSecret = var.tailscale_oauth_client_secret
+    }
+    # OKE uses CRI-O which enforces fully-qualified image names.
+    # Without the registry prefix, CRI-O rejects "short name" images.
+    operatorConfig = {
+      image = {
+        repository = "docker.io/tailscale/k8s-operator"
+      }
+      defaultTags = var.tailscale_tags
+    }
+    proxyConfig = {
+      image = {
+        repository = "docker.io/tailscale/tailscale"
+      }
+    }
+  }))]
+
+  depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tailscale[0]]
+
+  lifecycle {
+    precondition {
+      condition     = var.tailscale_oauth_client_id != null && var.tailscale_oauth_client_id != ""
+      error_message = "tailscale_oauth_client_id is required and must be non-empty when enable_tailscale is true. Create an OAuth client at Tailscale Admin → Settings → OAuth Clients."
+    }
+    precondition {
+      condition     = var.tailscale_oauth_client_secret != null && var.tailscale_oauth_client_secret != ""
+      error_message = "tailscale_oauth_client_secret is required and must be non-empty when enable_tailscale is true."
+    }
+  }
+}
+
+# The Connector CRD is installed by the Helm release above. Using local-exec
+# (rather than kubernetes_manifest) avoids plan-time CRD validation failures
+# when the operator has not yet been installed.
+#
+# triggers_replace causes Terraform to re-apply the Connector whenever the
+# hostname or advertised routes change, so drift is corrected automatically.
+resource "terraform_data" "tailscale_connector" {
+  count = var.enable_tailscale ? 1 : 0
+
+  triggers_replace = {
+    hostname         = local.tailscale_hostname
+    advertise_routes = join(",", sort(var.tailscale_advertise_routes))
+    tags             = join(",", sort(var.tailscale_tags))
+    cluster_id       = module.oke.cluster_id
+  }
+
+  provisioner "local-exec" {
+    # yamlencode() is used to produce the Connector manifest so that all
+    # variable values (tags, routes, hostname) are properly YAML-escaped,
+    # preventing injection via newlines or special characters in user inputs.
+    command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${module.oke.cluster_id} \
+        --region ${split(".", module.oke.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP"
+      kubectl --kubeconfig "$KUBECONFIG_TMP" \
+        wait --for=condition=Established \
+        crd/connectors.tailscale.com \
+        --timeout=120s
+      kubectl --kubeconfig "$KUBECONFIG_TMP" apply -f - <<YAML
+${yamlencode({
+    apiVersion = "tailscale.com/v1alpha1"
+    kind       = "Connector"
+    metadata = {
+      name = local.tailscale_hostname
+    }
+    spec = {
+      hostname = local.tailscale_hostname
+      tags     = var.tailscale_tags
+      exitNode = true
+      subnetRouter = {
+        advertiseRoutes = var.tailscale_advertise_routes
+      }
+    }
+})}
+YAML
+    EOT
+}
+
+provisioner "local-exec" {
+  when    = destroy
+  command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${self.triggers_replace.cluster_id} \
+        --region ${split(".", self.triggers_replace.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP" 2>/dev/null || true
+      kubectl --kubeconfig "$KUBECONFIG_TMP" \
+        delete connector ${self.triggers_replace.hostname} --ignore-not-found 2>/dev/null || true
+    EOT
+}
+
+depends_on = [helm_release.tailscale_operator]
+
+lifecycle {
+  precondition {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?$", local.tailscale_hostname))
+    error_message = "The derived Tailscale hostname \"${local.tailscale_hostname}\" is not a valid DNS label. Set tailscale_hostname explicitly or ensure cluster_name uses only lowercase letters, digits, and hyphens."
+  }
+}
 }

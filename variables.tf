@@ -273,3 +273,67 @@ variable "cloudflare_tunnel_namespace" {
   type        = string
   default     = "tunnel"
 }
+
+# ──────────────── Tailscale Exit Node ────────────────
+
+variable "enable_tailscale" {
+  description = "Deploy Tailscale Kubernetes Operator as an exit node and subnet router for the VCN"
+  type        = bool
+  default     = false
+}
+
+variable "tailscale_namespace" {
+  description = "Kubernetes namespace for the Tailscale Operator"
+  type        = string
+  default     = "tailscale"
+}
+
+variable "tailscale_operator_chart_version" {
+  description = "Tailscale Operator Helm chart version. If null, uses the latest available version — pin a specific version for reproducible deployments"
+  type        = string
+  default     = null
+}
+
+variable "tailscale_tags" {
+  description = "ACL tags applied to the Tailscale Operator and Connector. Must match tagOwners defined in your tailnet ACL policy"
+  type        = list(string)
+  default     = ["tag:k8s-operator"]
+  validation {
+    condition     = length(var.tailscale_tags) > 0 && alltrue([for t in var.tailscale_tags : startswith(t, "tag:")])
+    error_message = "tailscale_tags must be a non-empty list of strings in the format \"tag:<name>\"."
+  }
+}
+
+variable "tailscale_oauth_client_id" {
+  description = "Tailscale OAuth client ID. Create at Tailscale Admin → Settings → OAuth Clients. Required when enable_tailscale is true"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "tailscale_oauth_client_secret" {
+  description = "Tailscale OAuth client secret. Required when enable_tailscale is true"
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "tailscale_hostname" {
+  description = "Hostname registered in the Tailscale admin console for this connector. Defaults to cluster_name when null. Must be a valid DNS label (lowercase, alphanumeric and hyphens, max 63 chars)"
+  type        = string
+  default     = null
+  validation {
+    condition     = var.tailscale_hostname == null || can(regex("^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?$", var.tailscale_hostname))
+    error_message = "tailscale_hostname must be a valid DNS label: lowercase letters, digits, and hyphens only, starting and ending with alphanumeric, max 63 characters."
+  }
+}
+
+variable "tailscale_advertise_routes" {
+  description = "CIDR blocks to advertise via the Tailscale subnet router. Defaults to the full VCN CIDR to expose all subnets"
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
+  validation {
+    condition     = length(var.tailscale_advertise_routes) > 0
+    error_message = "tailscale_advertise_routes must contain at least one CIDR block."
+  }
+}
