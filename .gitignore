@@ -26,6 +26,7 @@ crash.*.log
 # Kubernetes secrets (filled-in copies of *.example.yaml)
 secret-thanos-objstore.yaml
 secret-loki-r2.yaml
+k8s/monitoring/secret-grafana-google-oauth.yaml
 
 # Private keys
 *.pem

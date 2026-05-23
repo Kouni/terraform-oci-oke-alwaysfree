@@ -1,22 +1,47 @@
 # ──────────────── kube-prometheus-stack Helm Values ────────────────
-# Chart: prometheus-community/kube-prometheus-stack
-# Repo:  https://prometheus-community.github.io/helm-charts
+# Chart:   prometheus-community/kube-prometheus-stack
+# Cluster: OKE Always Free — ARM64 A1.Flex, NFS storage, single node
+# Scope:   Metrics + Alerting + Dashboards (Prometheus + Grafana + AlertManager)
+# Access:  Cloudflare Tunnel (grafana.kouni.io) + kubectl port-forward
 #
-# OKE Always Free — single-node ARM64, NFS storage, no Thanos
+# Design principles:
+#   - All workloads pinned to ARM64 nodes (nodeSelector)
+#   - All persistent data on in-cluster NFS StorageClass
+#   - No LoadBalancer / Ingress — ClusterIP only; Cloudflare Tunnel for egress
+#   - Single replica everywhere (Always Free = no HA budget)
+#   - retentionSize stays 1 Gi below PVC size to prevent TSDB OOMKill
+
+# ──────────────── Global ────────────────
+commonLabels:
+  alwaysfree: "true"
 
 # ──────────────── Prometheus ────────────────
 prometheus:
   prometheusSpec:
     replicas: 1
-    retention: 30d
-    retentionSize: 14GB
+
+    # Retention: 90 days by time; 4.5 GB by size (PVC is 5 Gi — 0.5 Gi buffer).
+    # Sizing basis: ~5050 active series (OCI infra only) × 30s interval × 1.5 B/sample
+    # ≈ 253 B/s → ~1.97 GB at 90d. retentionSize triggers auto-eviction before PVC fills.
+    retention: 90d
+    retentionSize: 4.5GB
+
+    # WAL compression reduces write-ahead log size by ~20 % at negligible CPU cost.
+    walCompression: true
+
     resources:
       requests:
         cpu: 300m
-        memory: 1.5Gi
+        memory: 512Mi
       limits:
         cpu: "1"
-        memory: 3Gi
+        memory: 1.5Gi
+
+    # ARM64 nodes only
+    nodeSelector:
+      kubernetes.io/arch: arm64
+
+    # NFS-backed TSDB; StatefulSet volumeClaimTemplate — PVC is retained on helm uninstall
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -24,74 +49,94 @@ prometheus:
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
-              storage: 15Gi
-    nodeSelector:
-      kubernetes.io/arch: arm64
-    # remote_write disabled — local TSDB is the sole storage backend
-
-    # Scrape Loki and Tempo metrics. kube-prometheus-stack does not auto-discover
-    # these charts; without this config their metrics never appear in Prometheus.
-    # The namespace label is set explicitly so existing PromQL filters
-    # (e.g. {namespace="monitoring"}) continue to work correctly.
-    additionalScrapeConfigs:
-      - job_name: loki
-        metrics_path: /metrics
-        static_configs:
-          - targets: ['loki.monitoring.svc.cluster.local:3100']
-            labels:
-              namespace: monitoring
-              job: loki
-      - job_name: tempo
-        metrics_path: /metrics
-        static_configs:
-          - targets: ['tempo.monitoring.svc.cluster.local:3200']
-            labels:
-              namespace: monitoring
-              job: tempo
+              storage: 5Gi
 
 # ──────────────── Grafana ────────────────
 grafana:
   enabled: true
-  sidecar:
-    datasources:
-      prune: true
-  deleteDatasources:
-    - name: AlertManager
-      orgId: 1
-  persistence:
-    enabled: true
-    storageClassName: nfs
-    size: 2Gi
-    # Grafana uses a Deployment (not StatefulSet); helm uninstall deletes its PVC.
-    # This annotation preserves the PVC on helm uninstall to prevent data loss.
-    annotations:
-      "helm.sh/resource-policy": keep
+
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 768Mi
+
   nodeSelector:
     kubernetes.io/arch: arm64
+
+  # NFS-backed dashboards / user data.
+  # Grafana uses a Deployment (not a StatefulSet): helm uninstall will delete its PVC
+  # unless the keep annotation is present. This prevents accidental data loss when
+  # re-installing or rolling back the chart.
+  persistence:
+    enabled: true
+    storageClassName: nfs
+    size: 2Gi
+    annotations:
+      "helm.sh/resource-policy": keep
+
   grafana.ini:
     server:
+      # Cloudflare Tunnel public URL — must match the tunnel ingress hostname
       root_url: https://grafana.kouni.io
-    feature_toggles:
-      enable:
-        - unifiedNavbars
-        - dashboardNewLayouts
-  additionalDataSources:
-    - name: Loki
-      type: loki
-      url: http://loki.monitoring.svc:3100
+    security:
+      # Mark session cookies as Secure since external traffic arrives over HTTPS
+      cookie_secure: true
+    auth:
+      # Hide the username/password form — all logins go through Google OAuth.
+      # Admin escape hatch: /login?disableAutoLogin still accepts password login.
+      disable_login_form: true
+    auth.google:
+      enabled: true
+      # Credentials are injected from the grafana-google-oauth Kubernetes Secret
+      # (see k8s/monitoring/secret-grafana-google-oauth.yaml.example).
+      client_id: ${GF_AUTH_GOOGLE_CLIENT_ID}
+      client_secret: ${GF_AUTH_GOOGLE_CLIENT_SECRET}
+      scopes: openid email profile
+      auth_url: https://accounts.google.com/o/oauth2/v2/auth
+      token_url: https://oauth2.googleapis.com/token
+      api_url: https://openidconnect.googleapis.com/v1/userinfo
+      # Restrict sign-in to @lcse.org Google Workspace accounts only
+      allowed_domains: lcse.org
+      # Auto-create Grafana user on first Google sign-in
+      allow_sign_up: true
+      # Skip the Grafana login page and redirect straight to Google
+      auto_login: true
+      # New Google-authenticated users are assigned the Viewer role (read-only).
+      # Promote specific users to Editor / Admin via Grafana UI → Administration → Users.
+      role_attribute_path: "'Viewer'"
+  # Inject Google OAuth credentials from the grafana-google-oauth Kubernetes Secret.
+  # The secret must exist before running helm upgrade:
+  #   kubectl apply -f k8s/monitoring/secret-grafana-google-oauth.yaml
+  envFromSecret: grafana-google-oauth
+  # admin password: chart default is "prom-operator" — change immediately after first login
+  # via Grafana UI (Profile → Change password) or supply at install time with:
+  #   helm upgrade ... --set grafana.adminPassword='<strong-password>'
+  # Do NOT commit a plaintext password here.
 
 # ──────────────── AlertManager ────────────────
 alertmanager:
   alertmanagerSpec:
     replicas: 1
+
+    # 5-day retention for fired alert history
     retention: 120h
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    # ARM64 nodes only
+    nodeSelector:
+      kubernetes.io/arch: arm64
+
+    # NFS-backed alert state; StatefulSet volumeClaimTemplate — retained on helm uninstall
     storage:
       volumeClaimTemplate:
         spec:
@@ -100,18 +145,11 @@ alertmanager:
           resources:
             requests:
               storage: 1Gi
-    resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
-      limits:
-        cpu: 200m
-        memory: 256Mi
-    nodeSelector:
-      kubernetes.io/arch: arm64
 
 # ──────────────── kube-state-metrics ────────────────
 kube-state-metrics:
+  nodeSelector:
+    kubernetes.io/arch: arm64
   resources:
     requests:
       cpu: 50m
@@ -139,9 +177,6 @@ prometheusOperator:
     limits:
       cpu: 300m
       memory: 512Mi
+
   nodeSelector:
     kubernetes.io/arch: arm64
-
-# ──────────────── Global ────────────────
-commonLabels:
-  alwaysfree: "true"
