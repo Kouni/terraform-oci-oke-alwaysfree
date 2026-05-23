@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────── port-forward-monitoring.sh ────────────────
-# Start port-forward for monitoring components (Grafana / Prometheus / Loki).
+# Start port-forward for monitoring components (Grafana / Prometheus).
 # Usage: ./scripts/port-forward-monitoring.sh
 # Stop:  Ctrl+C
 set -euo pipefail
@@ -27,15 +27,11 @@ PIDS+=($!)
 kubectl -n "$NAMESPACE" port-forward svc/kube-prometheus-stack-prometheus 9090:9090 &
 PIDS+=($!)
 
-kubectl -n "$NAMESPACE" port-forward svc/loki 3100:3100 &
-PIDS+=($!)
-
 cat <<'EOF'
 
 Monitoring component access URLs
   Grafana:    http://localhost:3000
   Prometheus: http://localhost:9090
-  Loki:       http://localhost:3100
 
 Press Ctrl+C to stop all port-forwards.
 EOF

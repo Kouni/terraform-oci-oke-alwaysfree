@@ -723,12 +723,14 @@ resource "helm_release" "tailscale_operator" {
     operatorConfig = {
       image = {
         repository = "docker.io/tailscale/k8s-operator"
+        tag        = "latest"
       }
       defaultTags = var.tailscale_tags
     }
     proxyConfig = {
       image = {
         repository = "docker.io/tailscale/tailscale"
+        tag        = "latest"
       }
     }
   }))]
