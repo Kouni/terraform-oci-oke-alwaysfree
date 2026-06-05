@@ -95,3 +95,13 @@ notification_email    = "you@example.com"
 # tailscale_advertise_routes        = ["10.0.0.0/16"]  # full VCN CIDR; narrow if needed
 # tailscale_oauth_client_id         = "tskey-client-xx..."  # sensitive — do not commit
 # tailscale_oauth_client_secret     = "tskey-client-secret-xx..."  # sensitive — do not commit
+
+# ──────────────── Grafana Google OAuth ────────────────
+# Prerequisites:
+#   1. Go to: https://console.cloud.google.com/apis/credentials
+#   2. Create → OAuth client ID → Application type: Web application
+#   3. Authorized redirect URIs: https://grafana.kouni.io/login/google
+#      (replace "kouni.io" with your actual Cloudflare domain or public URL)
+#   4. Copy the generated Client ID and Client Secret below
+# grafana_google_client_id     = "123456789-abcdefghijklmnopqr.apps.googleusercontent.com"  # sensitive — do not commit
+# grafana_google_client_secret = "GOCSPX-..."  # sensitive — do not commit

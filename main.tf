@@ -192,6 +192,89 @@ resource "kubernetes_storage_class_v1" "oci_bv_xfs" {
   }
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Monitoring (Prometheus + Grafana)
+# ──────────────────────────────────────────────────────────────────────────────
+# kube-prometheus-stack is installed via Helm (manual kubectl apply or helm install).
+# This resource manages the monitoring namespace lifecycle and provides the
+# Kubernetes Secret for Grafana Google OAuth credentials.
+
+resource "kubernetes_namespace_v1" "monitoring" {
+  metadata {
+    name = "monitoring"
+    labels = {
+      "alwaysfree" = "true"
+    }
+  }
+
+  depends_on = [terraform_data.wait_for_nodes]
+}
+
+# Grafana Google OAuth credentials injected via K8s Secret.
+# Helm values reference environment variables from this Secret:
+#   grafana.ini.auth.google.client_id: ${GF_AUTH_GOOGLE_CLIENT_ID}
+#   grafana.ini.auth.google.client_secret: ${GF_AUTH_GOOGLE_CLIENT_SECRET}
+# Helm release uses envFromSecret: grafana-google-oauth to inject these.
+resource "kubernetes_secret_v1" "grafana_google_oauth" {
+  count = var.grafana_google_client_id != null && var.grafana_google_client_secret != null ? 1 : 0
+
+  metadata {
+    name      = "grafana-google-oauth"
+    namespace = kubernetes_namespace_v1.monitoring.metadata[0].name
+    labels = {
+      "alwaysfree" = "true"
+    }
+  }
+
+  type = "Opaque"
+
+  # Kubernetes provider automatically base64-encodes stringData.
+  # Do NOT call base64encode() here — it will double-encode.
+  data = {
+    GF_AUTH_GOOGLE_CLIENT_ID     = var.grafana_google_client_id
+    GF_AUTH_GOOGLE_CLIENT_SECRET = var.grafana_google_client_secret
+  }
+
+  depends_on = [kubernetes_namespace_v1.monitoring]
+}
+
+# Restart Grafana Deployment when Secret changes.
+# Kubernetes does not automatically reload Secret data into Pod environment variables.
+# We use a local-exec to patch the Deployment with a restart annotation,
+# which triggers a rolling restart and loads the new Secret values.
+# triggers_replace causes the resource to be replaced (and provisioner re-run)
+# whenever the Secret data changes.
+resource "terraform_data" "restart_grafana_on_secret_change" {
+  count = var.grafana_google_client_id != null && var.grafana_google_client_secret != null ? 1 : 0
+
+  triggers_replace = jsonencode({
+    client_id     = var.grafana_google_client_id
+    client_secret = var.grafana_google_client_secret
+  })
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${module.oke.cluster_id} \
+        --region ${split(".", module.oke.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP"
+      KUBECONFIG="$KUBECONFIG_TMP" kubectl -n monitoring patch deployment kube-prometheus-stack-grafana \
+        -p '{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"'"$(date -u +'%Y-%m-%dT%H:%M:%SZ')"'"}}}}}'
+    EOT
+  }
+
+  depends_on = [kubernetes_secret_v1.grafana_google_oauth]
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# NFS Storage
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Namespace is managed explicitly so that Terraform controls its lifecycle.
 # The Helm release sets create_namespace = false and depends on this resource,
 # which guarantees the namespace exists before chart installation and — crucially —
