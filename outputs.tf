@@ -38,3 +38,7 @@ output "node_pool_id" {
   value       = module.oke.node_pool_id
 }
 
+output "nat_gateway_public_ip" {
+  description = "Reserved Public IP of the NAT Gateway (null if enable_nat_gateway = false). This is the stable, fixed egress IP for all worker node traffic, including the Tailscale exit node."
+  value       = module.network.nat_gateway_public_ip
+}

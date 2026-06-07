@@ -20,11 +20,16 @@ bash scripts/destroy.sh -auto-approve # non-interactive
 
 ## backup-n8n.sh
 
-Backs up n8n Kubernetes Secrets, SQLite database, and Helm values to `backups/`.
+Backs up all Kubernetes Secrets (n8n, tunnel, monitoring, tailscale namespaces), n8n SQLite database, all Helm release values, and Terraform config (`terraform.tfvars`, `terraform.tfstate`) to `backups/<TIMESTAMP>/`.
 
 ```bash
-./scripts/backup-n8n.sh [namespace] [tunnel-namespace]
-# Defaults: namespace=n8n, tunnel-namespace=tunnel
+./scripts/backup-n8n.sh
+```
+
+After running, also back up NFS PVC data:
+
+```bash
+./scripts/backup-nfs-data.sh
 ```
 
 ## backup-nfs-data.sh
@@ -41,6 +46,32 @@ Restores n8n PVC data from a backup created by `backup-nfs-data.sh`. Used after 
 
 ```bash
 ./scripts/restore-nfs-data.sh <backup-directory>
+```
+
+### Full Restore Procedure
+
+**Same cluster** (cluster is healthy, only data/secrets need restoring):
+
+```bash
+# 1. Restore all K8s Secrets
+for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
+
+# 2. Restore NFS PVC data
+./scripts/restore-nfs-data.sh backups/nfs-<TIMESTAMP>
+```
+
+**New cluster** (cluster destroyed, rebuilding from scratch):
+
+```bash
+# 1. Restore terraform config and rebuild cluster
+cp backups/<TIMESTAMP>/terraform/terraform.tfvars .
+terraform apply
+
+# 2. Restore K8s Secrets (Terraform already recreates most, but apply backup to override)
+for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
+
+# 3. Restore NFS PVC data
+./scripts/restore-nfs-data.sh backups/nfs-<TIMESTAMP>
 ```
 
 > **Security**: Backup files contain sensitive data (encryption keys, credentials). The scripts set `umask 077` so only the owner can read backup files.
