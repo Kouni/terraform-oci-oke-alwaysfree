@@ -495,7 +495,7 @@ resource "oci_core_subnet" "worker" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.this.id
   cidr_block     = local.worker_subnet_cidr
-  display_name   = "worker-private-subnet"
+  display_name   = var.enable_nat_gateway ? "worker-private-subnet" : "worker-subnet"
   dns_label      = "worker"
   # Private when NAT Gateway is enabled: nodes get no public IP and all egress
   # flows through the NAT Gateway's fixed Reserved IP. Public otherwise.

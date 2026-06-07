@@ -33,7 +33,17 @@ backup_secret() {
   local name="$2"
   local outfile="${BACKUP_SUBDIR}/${3:-${name}.yaml}"
   if kubectl get secret "${name}" -n "${ns}" >/dev/null 2>&1; then
-    kubectl get secret "${name}" -n "${ns}" -o yaml > "${outfile}"
+    # Strip server-managed fields so the exported YAML can be cleanly re-applied
+    # to a fresh cluster without resourceVersion/uid conflicts.
+    kubectl get secret "${name}" -n "${ns}" -o yaml \
+      | yq 'del(
+          .metadata.resourceVersion,
+          .metadata.uid,
+          .metadata.creationTimestamp,
+          .metadata.managedFields,
+          .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"],
+          .status
+        )' > "${outfile}"
     echo "   [OK] ${ns}/${name}"
   else
     echo "   [!]  ${ns}/${name} not found, skipping"

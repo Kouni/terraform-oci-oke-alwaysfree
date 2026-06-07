@@ -56,6 +56,11 @@ notification_email    = "you@example.com"
 #   terraform apply
 #
 # enable_nat_gateway = true
+#
+# ──────────────── Blue-Green Node Migration (temporary) ────────────────
+# Used during node pool migration to allow a temporary worker subnet alongside
+# the permanent one. Remove after migration is complete.
+# migration_worker_cidr = "10.0.3.0/24"
 
 # ──────────────── Cluster Add-ons ────────────────
 # enable_metrics_server        = true
