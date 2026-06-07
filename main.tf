@@ -448,6 +448,7 @@ resource "kubernetes_namespace_v1" "n8n" {
     name = var.n8n_namespace
     labels = {
       "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/part-of"    = "n8n"
     }
   }
 }
@@ -457,6 +458,8 @@ resource "kubernetes_namespace_v1" "tunnel" {
     name = var.cloudflare_tunnel_namespace
     labels = {
       "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/name"       = "cloudflare-tunnel"
+      "app.kubernetes.io/component"  = "networking"
     }
   }
 }
@@ -467,6 +470,7 @@ resource "kubernetes_namespace_v1" "tailscale" {
     name = var.tailscale_namespace
     labels = {
       "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/name"       = "tailscale"
     }
   }
 }
@@ -521,6 +525,10 @@ resource "kubernetes_secret_v1" "n8n_secrets" {
   metadata {
     name      = var.n8n_secret_name
     namespace = kubernetes_namespace_v1.n8n.metadata[0].name
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/part-of"    = "n8n"
+    }
   }
 
   data = {
@@ -533,7 +541,7 @@ resource "kubernetes_secret_v1" "n8n_secrets" {
   lifecycle {
     precondition {
       condition     = var.n8n_encryption_key != null
-      error_message = "n8n_encryption_key is required when enable_n8n is true. For existing clusters, extract the current key with: kubectl get secret n8n-secrets -n n8n -o jsonpath='{.data.N8N_ENCRYPTION_KEY}' | base64 -d"
+      error_message = "n8n_encryption_key is required when enable_n8n is true. For existing clusters, extract the current key with: kubectl get secret ${var.n8n_secret_name} -n ${var.n8n_namespace} -o jsonpath='{.data.N8N_ENCRYPTION_KEY}' | base64 -d"
     }
     precondition {
       condition     = var.n8n_host != null
@@ -548,6 +556,10 @@ resource "kubernetes_secret_v1" "n8n_registry_creds" {
   metadata {
     name      = "n8n-registry-creds"
     namespace = kubernetes_namespace_v1.n8n.metadata[0].name
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/part-of"    = "n8n"
+    }
   }
 
   type = "kubernetes.io/dockerconfigjson"
@@ -572,6 +584,11 @@ resource "kubernetes_secret_v1" "cloudflare_tunnel" {
   metadata {
     name      = var.cloudflared_secret_name
     namespace = kubernetes_namespace_v1.tunnel.metadata[0].name
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/name"       = "cloudflare-tunnel"
+      "app.kubernetes.io/component"  = "networking"
+    }
   }
 
   data = {

@@ -229,7 +229,7 @@ variable "n8n_secret_name" {
 }
 
 variable "n8n_encryption_key" {
-  description = "N8N_ENCRYPTION_KEY value. For new deployments: generate with `openssl rand -hex 32`. For existing clusters: extract with `kubectl get secret n8n-secrets -n n8n -o jsonpath='{.data.N8N_ENCRYPTION_KEY}' | base64 -d`. Changing this value destroys all stored n8n credentials"
+  description = "N8N_ENCRYPTION_KEY value. For new deployments: generate with `openssl rand -hex 32`. For existing clusters: extract the current key from the Secret named by n8n_secret_name in n8n_namespace. Changing this value destroys all stored n8n credentials"
   type        = string
   default     = null
   sensitive   = true

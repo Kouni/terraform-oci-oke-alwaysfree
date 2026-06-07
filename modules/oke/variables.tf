@@ -71,7 +71,7 @@ variable "freeform_tags" {
 }
 
 variable "always_free_validation_id" {
-  description = "ID of the Always Free validation resource. Ensures cluster creation waits for validation without blocking data sources."
+  description = "ID of the Always Free validation resource. When wired to an upstream validation (as in root main.tf), ensures cluster creation waits for that validation to pass. When null, no gate is enforced."
   type        = string
   default     = null
 }
