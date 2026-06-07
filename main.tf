@@ -50,6 +50,8 @@ module "network" {
   source = "./modules/network"
 
   compartment_ocid       = var.compartment_ocid
+  enable_nat_gateway     = var.enable_nat_gateway
+  migration_worker_cidr  = var.migration_worker_cidr
   freeform_tags          = var.freeform_tags
   kube_api_allowed_cidrs = var.kube_api_allowed_cidrs
 }

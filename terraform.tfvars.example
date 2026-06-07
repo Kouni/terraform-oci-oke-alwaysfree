@@ -38,6 +38,25 @@ notification_email    = "you@example.com"
 # Defaults to ["0.0.0.0/0"] when unset for backward compatibility.
 # kube_api_allowed_cidrs = ["203.0.113.10/32", "198.51.100.0/24"]
 
+# NAT Gateway: stable egress IP for worker nodes (required for fixed Tailscale exit node IP)
+# When enabled, worker nodes become private (no individual public IP).
+# A Reserved Public IP is attached to the NAT Gateway — this is the fixed egress IP.
+# Cost: $0 (Reserved IP + NAT Gateway are both Always Free).
+#
+# ⚠️  DESTRUCTIVE: enabling this forces worker subnet recreation (~15 min downtime).
+# Use two-phase apply to build NAT first, then change subnet during maintenance:
+#
+#   # Phase A — no downtime, just creates NAT resources
+#   terraform apply \
+#     -target=module.network.oci_core_public_ip.nat_gw \
+#     -target=module.network.oci_core_nat_gateway.this
+#   terraform output nat_gateway_public_ip  # confirm fixed IP
+#
+#   # Phase B — worker subnet + nodes recreated (~15 min downtime)
+#   terraform apply
+#
+# enable_nat_gateway = true
+
 # ──────────────── Cluster Add-ons ────────────────
 # enable_metrics_server        = true
 # metrics_server_chart_version = null  # null = latest; pin with e.g. "3.12.2"

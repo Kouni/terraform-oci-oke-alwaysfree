@@ -18,3 +18,15 @@ output "kubeconfig_command" {
   # Region extracted from cluster OCID: ocid1.<type>.<realm>.<region>.<unique_id>
   value = "oci ce cluster create-kubeconfig --cluster-id ${oci_containerengine_cluster.this.id} --region ${split(".", oci_containerengine_cluster.this.id)[3]} --token-version 2.0.0 --kube-endpoint PUBLIC_ENDPOINT"
 }
+
+# ── Outputs used by migration.tf (blue-green migration support) ──
+
+output "kubernetes_version" {
+  description = "Resolved Kubernetes version used by the cluster and node pool."
+  value       = local.kubernetes_version
+}
+
+output "node_image_id" {
+  description = "OCID of the latest OKE-optimised ARM image used by the node pool."
+  value       = local.latest_arm_image_id
+}

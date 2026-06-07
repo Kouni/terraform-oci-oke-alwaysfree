@@ -74,6 +74,34 @@ resource "oci_core_service_gateway" "this" {
   }
 }
 
+# Reserved Public IP for the NAT Gateway. Created only when enable_nat_gateway
+# is true. lifetime = RESERVED ensures the IP is never released between
+# terraform apply runs — it persists until explicitly destroyed.
+# Cost: free when attached to a resource; ~$3/month only if left unattached.
+resource "oci_core_public_ip" "nat_gw" {
+  count = var.enable_nat_gateway ? 1 : 0
+
+  compartment_id = var.compartment_ocid
+  lifetime       = "RESERVED"
+  display_name   = "nat-gateway-ip"
+
+  freeform_tags = var.freeform_tags
+}
+
+# NAT Gateway provides a single, stable egress IP for private worker nodes.
+# All outbound internet traffic from workers flows through this gateway and
+# appears to originate from the Reserved Public IP above.
+resource "oci_core_nat_gateway" "this" {
+  count = var.enable_nat_gateway ? 1 : 0
+
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.this.id
+  display_name   = "nat-gateway"
+  public_ip_id   = oci_core_public_ip.nat_gw[0].id
+
+  freeform_tags = var.freeform_tags
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Route Tables
 # ──────────────────────────────────────────────────────────────────────────────
@@ -98,7 +126,10 @@ resource "oci_core_route_table" "worker" {
   display_name   = "worker-rt"
 
   route_rules {
-    network_entity_id = oci_core_internet_gateway.this.id
+    # When NAT Gateway is enabled, worker nodes are private: route outbound
+    # traffic through the NAT Gateway so all egress uses the fixed Reserved IP.
+    # Without NAT, workers are public and route directly via the Internet Gateway.
+    network_entity_id = var.enable_nat_gateway ? oci_core_nat_gateway.this[0].id : oci_core_internet_gateway.this.id
     destination       = "0.0.0.0/0"
     destination_type  = "CIDR_BLOCK"
   }
@@ -185,6 +216,48 @@ resource "oci_core_security_list" "api_endpoint" {
     }
   }
 
+  # TEMPORARY: allow migration worker subnet to reach API endpoint (ports 6443 & 12250).
+  # Set migration_worker_cidr = null after blue-green migration is complete.
+  dynamic "ingress_security_rules" {
+    for_each = var.migration_worker_cidr != null ? [var.migration_worker_cidr] : []
+    content {
+      protocol    = "6" # TCP
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      stateless   = false
+      tcp_options {
+        min = 6443
+        max = 6443
+      }
+    }
+  }
+  dynamic "ingress_security_rules" {
+    for_each = var.migration_worker_cidr != null ? [var.migration_worker_cidr] : []
+    content {
+      protocol    = "6" # TCP
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      stateless   = false
+      tcp_options {
+        min = 12250
+        max = 12250
+      }
+    }
+  }
+  dynamic "ingress_security_rules" {
+    for_each = var.migration_worker_cidr != null ? [var.migration_worker_cidr] : []
+    content {
+      protocol    = "1" # ICMP
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      stateless   = false
+      icmp_options {
+        type = 3
+        code = 4
+      }
+    }
+  }
+
   # Allow API endpoint to communicate with worker nodes
   egress_security_rules {
     protocol         = "6" # TCP
@@ -203,6 +276,30 @@ resource "oci_core_security_list" "api_endpoint" {
     icmp_options {
       type = 3
       code = 4
+    }
+  }
+
+  # TEMPORARY: allow API endpoint to communicate with migration worker nodes.
+  dynamic "egress_security_rules" {
+    for_each = var.migration_worker_cidr != null ? [var.migration_worker_cidr] : []
+    content {
+      protocol         = "6" # TCP
+      destination      = egress_security_rules.value
+      destination_type = "CIDR_BLOCK"
+      stateless        = false
+    }
+  }
+  dynamic "egress_security_rules" {
+    for_each = var.migration_worker_cidr != null ? [var.migration_worker_cidr] : []
+    content {
+      protocol         = "1" # ICMP
+      destination      = egress_security_rules.value
+      destination_type = "CIDR_BLOCK"
+      stateless        = false
+      icmp_options {
+        type = 3
+        code = 4
+      }
     }
   }
 
@@ -245,6 +342,17 @@ resource "oci_core_security_list" "worker" {
     source      = local.worker_subnet_cidr
     source_type = "CIDR_BLOCK"
     stateless   = false
+  }
+
+  # TEMPORARY: allow migration worker nodes to communicate with existing workers.
+  dynamic "ingress_security_rules" {
+    for_each = var.migration_worker_cidr != null ? [var.migration_worker_cidr] : []
+    content {
+      protocol    = "all"
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      stateless   = false
+    }
   }
 
   # Allow API endpoint to communicate with workers (kubelet)
@@ -384,12 +492,14 @@ resource "oci_core_subnet" "api_endpoint" {
 }
 
 resource "oci_core_subnet" "worker" {
-  compartment_id             = var.compartment_ocid
-  vcn_id                     = oci_core_vcn.this.id
-  cidr_block                 = local.worker_subnet_cidr
-  display_name               = "worker-subnet"
-  dns_label                  = "worker"
-  prohibit_public_ip_on_vnic = false
+  compartment_id = var.compartment_ocid
+  vcn_id         = oci_core_vcn.this.id
+  cidr_block     = local.worker_subnet_cidr
+  display_name   = "worker-private-subnet"
+  dns_label      = "worker"
+  # Private when NAT Gateway is enabled: nodes get no public IP and all egress
+  # flows through the NAT Gateway's fixed Reserved IP. Public otherwise.
+  prohibit_public_ip_on_vnic = var.enable_nat_gateway
   route_table_id             = oci_core_route_table.worker.id
   security_list_ids          = [oci_core_security_list.worker.id]
 

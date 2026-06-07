@@ -45,6 +45,18 @@ variable "compartment_ocid" {
 
 # Network hardening
 
+variable "enable_nat_gateway" {
+  description = "Create a NAT Gateway with a Reserved Public IP so worker nodes have a stable, fixed egress IP. Required for Tailscale exit node to advertise a consistent IP. When true, the worker subnet becomes private (no public IP on nodes). See modules/network/variables.tf for the two-phase apply procedure."
+  type        = bool
+  default     = false
+}
+
+variable "migration_worker_cidr" {
+  description = "TEMPORARY: extra worker CIDR (e.g. 10.0.3.0/24) to include in security list rules during blue-green migration. Set to null after migration is complete."
+  type        = string
+  default     = null
+}
+
 variable "kube_api_allowed_cidrs" {
   description = "CIDR blocks allowed to reach the Kubernetes API endpoint (TCP/6443). Defaults to 0.0.0.0/0 for backward compatibility; restrict to known operator/CI CIDRs in production for defense-in-depth"
   type        = list(string)

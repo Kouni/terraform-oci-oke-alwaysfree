@@ -1,79 +1,119 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# n8n Backup Script
+# Complete Backup Script
 #
-# Back up n8n K8s Secrets, SQLite database, and Helm values to local backups/ directory.
-# Backup files contain real sensitive data. Store them securely.
+# Backs up all K8s Secrets, n8n SQLite database, all Helm release values, and
+# Terraform config to backups/<TIMESTAMP>/. Run backup-nfs-data.sh separately
+# for NFS PVC data (requires n8n scale-down).
+#
+# Backup files contain sensitive data. Store them securely.
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 umask 077
 
-NAMESPACE="${1:-n8n}"
-TUNNEL_NS="${2:-tunnel}"
 MAX_BACKUPS=7
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKUP_DIR="${SCRIPT_DIR}/backups"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BACKUP_DIR="${REPO_DIR}/backups"
 TIMESTAMP="$(date +%Y%m%d%H%M)"
 BACKUP_SUBDIR="${BACKUP_DIR}/${TIMESTAMP}"
 
 # ──────────────── Preflight checks ────────────────
 command -v kubectl >/dev/null 2>&1 || { echo "[ERROR] kubectl not found"; exit 1; }
-kubectl get ns "${NAMESPACE}" >/dev/null 2>&1 || { echo "[ERROR] Namespace '${NAMESPACE}' not found"; exit 1; }
+kubectl cluster-info >/dev/null 2>&1 || { echo "[ERROR] Cannot reach cluster"; exit 1; }
 
-echo "[*] Backing up n8n secrets from namespace '${NAMESPACE}'..."
+echo "[*] Complete backup — ${TIMESTAMP}"
 echo "   Target: ${BACKUP_SUBDIR}"
 mkdir -p "${BACKUP_SUBDIR}"
+mkdir -p "${BACKUP_SUBDIR}/terraform"
 
-# ──────────────── Backup Secrets (YAML) ────────────────
-echo "[*] Exporting Kubernetes Secrets..."
-for secret in n8n-secrets; do
-  if kubectl get secret "${secret}" -n "${NAMESPACE}" >/dev/null 2>&1; then
-    kubectl get secret "${secret}" -n "${NAMESPACE}" -o yaml > "${BACKUP_SUBDIR}/${secret}.yaml"
-    echo "   [OK] ${secret} (ns: ${NAMESPACE})"
+# ──────────────── Helper: backup a single K8s secret ────────────────
+backup_secret() {
+  local ns="$1"
+  local name="$2"
+  local outfile="${BACKUP_SUBDIR}/${3:-${name}.yaml}"
+  if kubectl get secret "${name}" -n "${ns}" >/dev/null 2>&1; then
+    kubectl get secret "${name}" -n "${ns}" -o yaml > "${outfile}"
+    echo "   [OK] ${ns}/${name}"
   else
-    echo "   [!]  ${secret} not found in ${NAMESPACE}, skipping"
+    echo "   [!]  ${ns}/${name} not found, skipping"
   fi
-done
-if kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" >/dev/null 2>&1; then
-  kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" -o yaml > "${BACKUP_SUBDIR}/cloudflare-tunnel.yaml"
-  echo "   [OK] cloudflare-tunnel (ns: ${TUNNEL_NS})"
-else
-  echo "   [!]  cloudflare-tunnel not found in ${TUNNEL_NS}, skipping"
-fi
+}
+
+# ──────────────── Helper: decode a secret field to plaintext ────────────────
+decode_secret_field() {
+  local ns="$1" name="$2" key="$3"
+  kubectl get secret "${name}" -n "${ns}" -o "jsonpath={.data.${key}}" 2>/dev/null \
+    | base64 -d 2>/dev/null || echo "<not found>"
+}
+
+# ──────────────── Backup Secrets (all namespaces) ────────────────
+echo ""
+echo "[*] Exporting Kubernetes Secrets..."
+backup_secret n8n           n8n-secrets
+backup_secret n8n           n8n-registry-creds
+backup_secret n8n           n8n-task-runners
+backup_secret tunnel        cloudflare-tunnel
+backup_secret monitoring    grafana-google-oauth
+backup_secret tailscale     operator              tailscale-operator.yaml
+backup_secret tailscale     operator-oauth        tailscale-operator-oauth.yaml
 
 # ──────────────── Extract plaintext keys (for password manager) ────────────────
+echo ""
 echo "[*] Extracting plaintext keys..."
 KEYS_FILE="${BACKUP_SUBDIR}/plaintext-keys.txt"
 cat > "${KEYS_FILE}" <<EOF
-# n8n Secrets Backup — ${TIMESTAMP}
-# [!]  This file contains sensitive data. Store in a password manager and then delete.
+# Complete Secrets Backup — ${TIMESTAMP}
+# ⚠️  This file contains sensitive data. Store in a password manager and then delete.
 
 EOF
 
-if kubectl get secret n8n-secrets -n "${NAMESPACE}" >/dev/null 2>&1; then
-  echo "## n8n-secrets" >> "${KEYS_FILE}"
+{
+  echo "## n8n/n8n-secrets"
   for key in N8N_ENCRYPTION_KEY N8N_HOST N8N_PORT N8N_PROTOCOL; do
-    val=$(kubectl get secret n8n-secrets -n "${NAMESPACE}" -o jsonpath="{.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || echo "<not found>")
-    echo "${key}=${val}" >> "${KEYS_FILE}"
+    echo "${key}=$(decode_secret_field n8n n8n-secrets "${key}")"
   done
-  echo "" >> "${KEYS_FILE}"
-fi
+  echo ""
+  echo "## tunnel/cloudflare-tunnel"
+  echo "TUNNEL_TOKEN=$(decode_secret_field tunnel cloudflare-tunnel TUNNEL_TOKEN)"
+  echo ""
+  echo "## monitoring/grafana-google-oauth"
+  echo "GF_AUTH_GOOGLE_CLIENT_ID=$(decode_secret_field monitoring grafana-google-oauth GF_AUTH_GOOGLE_CLIENT_ID)"
+  echo "GF_AUTH_GOOGLE_CLIENT_SECRET=$(decode_secret_field monitoring grafana-google-oauth GF_AUTH_GOOGLE_CLIENT_SECRET)"
+  echo ""
+  echo "## tailscale/operator-oauth"
+  echo "client_id=$(decode_secret_field tailscale operator-oauth client_id)"
+  echo "client_secret=$(decode_secret_field tailscale operator-oauth client_secret)"
+  echo ""
+} >> "${KEYS_FILE}"
+echo "   [OK] plaintext-keys.txt"
 
-if kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" >/dev/null 2>&1; then
-  echo "## cloudflare-tunnel (namespace: ${TUNNEL_NS})" >> "${KEYS_FILE}"
-  val=$(kubectl get secret cloudflare-tunnel -n "${TUNNEL_NS}" -o jsonpath='{.data.TUNNEL_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || echo "<not found>")
-  echo "TUNNEL_TOKEN=${val}" >> "${KEYS_FILE}"
-  echo "" >> "${KEYS_FILE}"
+# ──────────────── Backup Terraform config ────────────────
+echo ""
+echo "[*] Backing up Terraform config..."
+if [ -f "${REPO_DIR}/terraform.tfvars" ]; then
+  cp "${REPO_DIR}/terraform.tfvars" "${BACKUP_SUBDIR}/terraform/terraform.tfvars"
+  echo "   [OK] terraform.tfvars"
+else
+  echo "   [!]  terraform.tfvars not found, skipping"
+fi
+if [ -f "${REPO_DIR}/terraform.tfstate" ]; then
+  cp "${REPO_DIR}/terraform.tfstate" "${BACKUP_SUBDIR}/terraform/terraform.tfstate"
+  echo "   [OK] terraform.tfstate"
+else
+  echo "   [!]  terraform.tfstate not found, skipping"
 fi
 
 # ──────────────── Backup n8n SQLite database ────────────────
+echo ""
 echo "[*] Backing up n8n SQLite database..."
-N8N_POD=$(kubectl get pod -n "${NAMESPACE}" -l app.kubernetes.io/name=n8n -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+N8N_POD=$(kubectl get pod -n n8n -l app.kubernetes.io/name=n8n \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 if [ -n "${N8N_POD}" ]; then
-  # Trigger SQLite checkpoint to flush WAL to main database
-  kubectl exec -n "${NAMESPACE}" "${N8N_POD}" -- \
+  # Flush WAL to main database before copy
+  kubectl exec -n n8n "${N8N_POD}" -- \
     sqlite3 /home/node/.n8n/database.sqlite "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
-  kubectl cp "${NAMESPACE}/${N8N_POD}:/home/node/.n8n/database.sqlite" \
+  kubectl cp "n8n/${N8N_POD}:/home/node/.n8n/database.sqlite" \
     "${BACKUP_SUBDIR}/database.sqlite" 2>/dev/null && \
     echo "   [OK] database.sqlite ($(du -h "${BACKUP_SUBDIR}/database.sqlite" | cut -f1))" || \
     echo "   [!]  Failed to copy database.sqlite"
@@ -81,11 +121,18 @@ else
   echo "   [!]  n8n pod not found, skipping database backup"
 fi
 
-# ──────────────── Backup Helm release info ────────────────
-echo "[*] Exporting Helm release info..."
+# ──────────────── Backup all Helm release values ────────────────
+echo ""
+echo "[*] Exporting Helm release values..."
 if command -v helm >/dev/null 2>&1; then
-  helm get values n8n -n "${NAMESPACE}" -o yaml > "${BACKUP_SUBDIR}/helm-values.yaml" 2>/dev/null && \
-    echo "   [OK] helm-values.yaml" || echo "   [!]  n8n helm release not found"
+  while IFS=$'\t' read -r release ns; do
+    [ -z "${release}" ] && continue
+    outfile="${BACKUP_SUBDIR}/helm-${ns}-${release}.yaml"
+    helm get values "${release}" -n "${ns}" -o yaml > "${outfile}" 2>/dev/null && \
+      echo "   [OK] ${ns}/${release}" || echo "   [!]  ${ns}/${release} values not found"
+  done < <(helm list --all-namespaces -o json 2>/dev/null \
+    | python3 -c "import sys,json; [print(r['name']+'\t'+r['namespace']) for r in json.load(sys.stdin)]" \
+    2>/dev/null || true)
 else
   echo "   [!]  helm not found, skipping"
 fi
@@ -94,6 +141,7 @@ fi
 BACKUP_COUNT=$(find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | wc -l | tr -d ' ')
 if [ "${BACKUP_COUNT}" -gt "${MAX_BACKUPS}" ]; then
   REMOVE_COUNT=$((BACKUP_COUNT - MAX_BACKUPS))
+  echo ""
   echo "[*]  Rotating old backups (keeping latest ${MAX_BACKUPS})..."
   find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | head -n "${REMOVE_COUNT}" | while read -r old_dir; do
     echo "   [*]  Removing ${old_dir}"
@@ -105,9 +153,20 @@ fi
 echo ""
 echo "[OK] Backup complete: ${BACKUP_SUBDIR}"
 echo ""
-ls -lh "${BACKUP_SUBDIR}"
+ls -lhR "${BACKUP_SUBDIR}"
 echo ""
 echo "[!]  Important reminders:"
-echo "   1. plaintext-keys.txt contains plaintext keys. Store in a password manager and consider deleting it."
-echo "   2. The backups/ directory is excluded by .gitignore and will not be committed to version control."
-echo "   3. N8N_ENCRYPTION_KEY is the most critical backup item. Losing it makes n8n credentials unrecoverable."
+echo "   1. plaintext-keys.txt and terraform/terraform.tfvars contain sensitive data."
+echo "      The backups/ directory is excluded by .gitignore and will not be committed."
+echo "   2. N8N_ENCRYPTION_KEY is critical — losing it makes all n8n credentials unrecoverable."
+echo "   3. Run ./scripts/backup-nfs-data.sh separately to back up NFS PVC data."
+echo ""
+echo "   Restore (same cluster):"
+echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do kubectl apply -f \"\$f\"; done"
+echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
+echo ""
+echo "   Restore (new cluster):"
+echo "      cp \"${BACKUP_SUBDIR}/terraform/terraform.tfvars\" ."
+echo "      terraform apply"
+echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do kubectl apply -f \"\$f\"; done"
+echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
