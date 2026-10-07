@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# destroy.sh — Safe Terraform destroy wrapper
+# destroy.sh — Safe OpenTofu destroy wrapper
 #
 # Usage:
 #   bash scripts/destroy.sh               # interactive confirmation
 #   bash scripts/destroy.sh -auto-approve # non-interactive
 #
 # Why this script exists:
-#   terraform destroy can fail or leave orphaned OCI resources for two reasons:
+#   tofu destroy can fail or leave orphaned OCI resources for two reasons:
 #
 #   1. The OCI Block Volume backing the NFS server PVC is orphaned if the
 #      CSI driver is killed before it can call the OCI API. The CSI driver's
@@ -21,7 +21,7 @@
 #   2. The Helm/Kubernetes provider times out with "context deadline exceeded"
 #      when the OKE API server becomes unreachable after nodes are terminated.
 #
-# Requires: terraform, kubectl
+# Requires: tofu, kubectl
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -64,9 +64,9 @@ echo ""
 
 # ── Step 2: Remove in-cluster resources from state ────────────────────────────
 # Namespaces and their contents are already gone; removing from state so
-# terraform destroy does not try to contact a dead API server for them.
+# tofu destroy does not try to contact a dead API server for them.
 
-echo "Removing in-cluster resources from Terraform state..."
+echo "Removing in-cluster resources from OpenTofu state..."
 echo "(OKE cluster deletion removes any remaining Kubernetes resources automatically)"
 echo ""
 
@@ -74,8 +74,8 @@ removed=0
 while IFS= read -r resource; do
   [[ -z "$resource" ]] && continue
   echo "  Removing: $resource"
-  terraform state rm "$resource" && ((removed += 1)) || true
-done < <(terraform state list 2>/dev/null \
+  tofu state rm "$resource" && ((removed += 1)) || true
+done < <(tofu state list 2>/dev/null \
   | grep -E '^(kubernetes_|helm_release\.)' || true)
 
 if [[ $removed -eq 0 ]]; then
@@ -86,4 +86,4 @@ echo ""
 
 # ── Step 3: Destroy OCI infrastructure ────────────────────────────────────────
 
-terraform destroy "$@"
+tofu destroy "$@"

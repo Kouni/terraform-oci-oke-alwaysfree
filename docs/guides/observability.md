@@ -1,7 +1,7 @@
 # OKE Always Free — Observability Stack
 
 > **Scope:** Prometheus (metrics) + Grafana (dashboards) + AlertManager (notifications).
-> Deployed manually via Helm. Not managed by Terraform.
+> Deployed manually via Helm. Not managed by OpenTofu.
 
 ## Architecture
 
@@ -48,12 +48,12 @@ Sizing basis: ~5050 active series (OCI infra only) × 30 s scrape interval ×
 | Component          | CPU Req | Mem Req | CPU Limit | Mem Limit |
 |--------------------|---------|---------|-----------|-----------|
 | Prometheus         | 300m    | 512 Mi  | 1000m     | 1.5 Gi    |
-| Grafana            | 100m    | 256 Mi  | 500m      | 768 Mi    |
+| Grafana            | 100m    | 512 Mi  | 500m      | 1 Gi      |
 | AlertManager       | 50m     | 128 Mi  | 200m      | 256 Mi    |
 | kube-state-metrics | 50m     | 128 Mi  | 200m      | 256 Mi    |
 | node-exporter      | 50m     | 64 Mi   | 200m      | 128 Mi    |
 | Prometheus Operator| 100m    | 256 Mi  | 300m      | 512 Mi    |
-| **Total Request**  | ~650m   | ~1.3 Gi |           |           |
+| **Total Request**  | ~650m   | ~1.6 Gi |           |           |
 
 A1.Flex available (after OS + system pods): ~3300m CPU, ~22 Gi RAM.
 
@@ -115,6 +115,40 @@ In the **Cloudflare Zero Trust Dashboard** → Networks → Tunnels → your tun
 Grafana is already configured with `root_url: https://grafana.kouni.io` and `cookie_secure: true`.
 
 Verify: open `https://grafana.kouni.io` (default credentials: `admin` / `prom-operator`).
+
+### Cloudflare Access (edge authentication)
+
+Grafana's Google OAuth protects data, but every unauthenticated request still reaches
+the Grafana pod. Automated scanners probing paths such as `/.env` or
+`/terraform.tfstate` have caused memory bursts large enough to SIGKILL the container.
+Cloudflare Access blocks these requests at the edge, before they enter the tunnel.
+
+In the **Cloudflare Zero Trust Dashboard**:
+
+1. **Settings → Authentication → Login methods**: add **Google** (or use One-time PIN).
+2. **Access → Applications → Add an application → Self-hosted**:
+
+   | Field              | Value                    |
+   |--------------------|--------------------------|
+   | Application domain | `grafana.kouni.io`       |
+   | Session duration   | `24 hours`               |
+   | Identity providers | Google                   |
+
+3. Add a policy:
+
+   | Field   | Value                          |
+   |---------|--------------------------------|
+   | Action  | `Allow`                        |
+   | Include | **Emails ending in** `@lcse.org` |
+
+Verify from an unauthenticated session; the response should be a redirect to
+`<team>.cloudflareaccess.com`, not Grafana:
+
+```bash
+curl -sI https://grafana.kouni.io/.env | grep -i '^location'
+```
+
+Grafana's own Google OAuth stays enabled as the second layer and still assigns roles.
 
 ### Port-forward (local / fallback)
 
@@ -180,6 +214,19 @@ helm upgrade --install kube-prometheus-stack \
 
 The chart default password is `prom-operator`. Set a strong password at install time via `--set grafana.adminPassword=` (see Step 3 above). Do **not** commit a plaintext password to this file.
 
+### Custom alert rules
+
+`additionalPrometheusRulesMap` in `values-kube-prometheus-stack.yaml` adds rules that
+the chart defaults do not cover:
+
+| Alert                | Severity | Fires when                                                   |
+|----------------------|----------|--------------------------------------------------------------|
+| `ContainerSigKilled` | warning  | A container restarted in the last 15 min with exit code 137  |
+| `ContainerRestarted` | info     | Any container restarted in the last hour                     |
+
+Exit code 137 covers both cgroup OOM kills and liveness-probe kills. CRI-O on cgroup v2
+may report `reason=Error` instead of `OOMKilled`, so the alert keys on the exit code.
+
 ### Import dashboards
 
 Community dashboards (import by ID in Grafana → Dashboards → Import):
@@ -206,6 +253,29 @@ helm upgrade kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml
+```
+
+### Upgrade chart major version
+
+Helm does not upgrade CRDs. Before a major chart bump, check
+[UPGRADE.md](https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/UPGRADE.md)
+for breaking changes, then apply the CRDs matching the new chart's `appVersion`
+(the prometheus-operator version):
+
+```bash
+helm repo update
+OPERATOR_VERSION=$(helm show chart prometheus-community/kube-prometheus-stack | awk '/^appVersion:/ {print $2}')
+for crd in alertmanagerconfigs alertmanagers podmonitors probes prometheusagents \
+           prometheuses prometheusrules scrapeconfigs servicemonitors thanosrulers; do
+  kubectl apply --server-side --force-conflicts -f \
+    "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/${OPERATOR_VERSION}/example/prometheus-operator-crd/monitoring.coreos.com_${crd}.yaml"
+done
+
+helm upgrade kube-prometheus-stack \
+  prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --wait --timeout 10m
 ```
 
 ### Uninstall

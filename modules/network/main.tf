@@ -76,7 +76,7 @@ resource "oci_core_service_gateway" "this" {
 
 # Reserved Public IP for the NAT Gateway. Created only when enable_nat_gateway
 # is true. lifetime = RESERVED ensures the IP is never released between
-# terraform apply runs — it persists until explicitly destroyed.
+# tofu apply runs — it persists until explicitly destroyed.
 # Cost: free when attached to a resource; ~$3/month only if left unattached.
 resource "oci_core_public_ip" "nat_gw" {
   count = var.enable_nat_gateway ? 1 : 0

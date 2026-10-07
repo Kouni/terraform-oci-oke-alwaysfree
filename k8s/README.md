@@ -1,6 +1,6 @@
 # n8n on OKE Always Free -- Cloudflare Zero Trust Tunnel Deployment Guide
 
-Deploy [n8n](https://n8n.io) workflow automation platform on an OCI Always Free OKE cluster, securely accessed via Cloudflare Zero Trust Tunnel, **fully managed by Terraform**, at zero additional cost.
+Deploy [n8n](https://n8n.io) workflow automation platform on an OCI Always Free OKE cluster, securely accessed via Cloudflare Zero Trust Tunnel, **fully managed by OpenTofu**, at zero additional cost.
 
 > **Helm Chart**: n8n official — `oci://ghcr.io/n8n-io/n8n-helm-chart/n8n`
 > **Source**: [github.com/n8n-io/n8n-hosting](https://github.com/n8n-io/n8n-hosting)
@@ -16,7 +16,7 @@ Deploy [n8n](https://n8n.io) workflow automation platform on an OCI Always Free 
 - [Deployment Steps](#deployment-steps)
   - [Step 1: Create Cloudflare Tunnel](#step-1-create-cloudflare-tunnel)
   - [Step 2: Configure terraform.tfvars](#step-2-configure-terraformtfvars)
-  - [Step 3: Run Terraform Apply](#step-3-run-terraform-apply)
+  - [Step 3: Run OpenTofu Apply](#step-3-run-opentofu-apply)
   - [Step 4: Verify Deployment](#step-4-verify-deployment)
   - [Step 5: Configure Cloudflare Access Policy](#step-5-configure-cloudflare-access-policy)
 - [Post-Deployment Recommendations](#post-deployment-recommendations)
@@ -112,7 +112,7 @@ n8n Pod ──mount──▶ NFS PVC ──▶ nfs-server-provisioner ──▶ 
 | **Execution Mode** | Standalone (SQLite) | No external PostgreSQL/Redis required; suitable for Always Free single-node |
 | **cloudflared Deployment** | Separate Deployment (`tunnel` namespace) | Shared Tunnel service usable by any in-cluster service; official chart does not support `extraContainers` |
 | **Persistence** | NFS StorageClass | Uses the existing nfs-server-provisioner; data stored on OCI Block Volume |
-| **Secrets Management** | Terraform-managed (`kubernetes_secret_v1` in root `main.tf`); stored in Terraform state but marked as sensitive | Single-pane Terraform management of all resources; sensitive marking prevents values from appearing in plan output |
+| **Secrets Management** | OpenTofu-managed (`kubernetes_secret_v1` in root `main.tf`); stored in OpenTofu state but marked as sensitive | Single-pane OpenTofu management of all resources; sensitive marking prevents values from appearing in plan output |
 
 ### Dual-Layer Authentication Architecture
 
@@ -129,7 +129,7 @@ n8n employs two layers of authentication for security:
 
 | Item | Description |
 |------|-------------|
-| **Terraform** | >= 1.5.0, with OCI, Helm, and Kubernetes providers installed |
+| **OpenTofu** | >= 1.6.0, with OCI, Helm, and Kubernetes providers installed |
 | **OCI CLI** | Installed and configured with a config profile (required for Helm/Kubernetes provider auth) |
 | **kubectl** | Configured to connect to the OKE cluster (`oci ce cluster create-kubeconfig ...`) |
 | **Cloudflare Account** | Owns a domain added to Cloudflare (Free plan is sufficient) |
@@ -207,17 +207,17 @@ Available variables:
 
 ---
 
-### Step 3: Run Terraform Apply
+### Step 3: Run OpenTofu Apply
 
 ```bash
 # Preview changes
-terraform plan
+tofu plan
 
 # Apply changes
-terraform apply
+tofu apply
 ```
 
-Terraform will create the following resources:
+OpenTofu will create the following resources:
 
 - `kubernetes_namespace_v1.n8n` -- n8n namespace
 - `kubernetes_namespace_v1.tunnel` -- tunnel namespace
@@ -392,9 +392,9 @@ n8n + cloudflared **do not consume additional** OCI Always Free infrastructure q
 | Block Volume | +0 (NFS PVC) | +0 | 200 GB shared |
 | Load Balancer | 0 (ClusterIP) | 0 | N/A |
 
-### Secrets in Terraform State (Marked as Sensitive)
+### Secrets in OpenTofu State (Marked as Sensitive)
 
-Kubernetes Secrets are managed by Terraform `kubernetes_secret_v1` resources and **are stored in `terraform.tfstate`**, but all sensitive fields are marked as `sensitive` and will not appear in `terraform plan`/`apply` output. Safeguard the state file, or use a remote backend (e.g. OCI Object Storage).
+Kubernetes Secrets are managed by OpenTofu `kubernetes_secret_v1` resources and **are stored in `terraform.tfstate`**, but all sensitive fields are marked as `sensitive` and will not appear in `tofu plan`/`apply` output. Safeguard the state file, or use a remote backend (e.g. OCI Object Storage).
 
 ### Cloudflare Handles TLS
 
@@ -412,7 +412,7 @@ Kubernetes Secrets are managed by Terraform `kubernetes_secret_v1` resources and
 
 **Problem**: OKE uses CRI-O as its container runtime. CRI-O **does not** automatically prepend `docker.io/`.
 
-**Solution**: Ensure image names use fully qualified registry paths (fully qualified image names). This project already has the correct configuration in Terraform:
+**Solution**: Ensure image names use fully qualified registry paths (fully qualified image names). This project already has the correct configuration in OpenTofu:
 
 | Component | Correct Image Name |
 |-----------|--------------------|
@@ -460,7 +460,7 @@ kubectl get secret cloudflare-tunnel -n tunnel -o jsonpath='{.data.TUNNEL_TOKEN}
 
 2. **NFS storage not enabled** -- Confirm `enable_nfs_storage = true` has been applied
 
-3. **Secret does not exist** -- Confirm Terraform apply completed without errors
+3. **Secret does not exist** -- Confirm OpenTofu apply completed without errors
 
    ```bash
    kubectl get secrets -n n8n
@@ -490,7 +490,7 @@ kubectl run test-curl --rm -it --image=docker.io/curlimages/curl:latest -n n8n -
   curl -s http://n8n-main:5678/healthz
 ```
 
-### Terraform Apply Error: enable_nfs_storage must be true
+### OpenTofu Apply Error: enable_nfs_storage must be true
 
 n8n depends on the NFS StorageClass for persistent storage. Ensure both are enabled in `terraform.tfvars`:
 
@@ -544,7 +544,7 @@ kubectl cp backups/<YYYYMMDDHHMM>/database.sqlite n8n/${N8N_POD}:/home/node/.n8n
 kubectl rollout restart deployment/n8n-main -n n8n
 ```
 
-> NOTE: Secrets (encryption key, Tunnel Token) are managed by Terraform. To update keys, modify `terraform.tfvars` and run `terraform apply`.
+> NOTE: Secrets (encryption key, Tunnel Token) are managed by OpenTofu. To update keys, modify `terraform.tfvars` and run `tofu apply`.
 
 ### Important Backup Notes
 
@@ -567,26 +567,26 @@ enable_n8n               = false
 enable_cloudflare_tunnel = false
 ```
 
-Run Terraform:
+Run OpenTofu:
 
 ```bash
-terraform apply
+tofu apply
 ```
 
 This will remove `helm_release.n8n`, `kubernetes_deployment_v1.cloudflared`, and related Secrets. **Namespaces (`n8n`, `tunnel`) and the PVC (`n8n-data`) are preserved**; no data is lost.
 
 ### Option 2: Complete Removal (including namespaces and PVCs)
 
-Namespaces and PVCs are permanent resources; `terraform destroy` will not delete them. They must be manually removed from state before deletion:
+Namespaces and PVCs are permanent resources; `tofu destroy` will not delete them. They must be manually removed from state before deletion:
 
 ```bash
 # 1. First disable the application layer (see Option 1)
-terraform apply -var="enable_n8n=false" -var="enable_cloudflare_tunnel=false"
+tofu apply -var="enable_n8n=false" -var="enable_cloudflare_tunnel=false"
 
-# 2. Remove from Terraform state
-terraform state rm kubernetes_namespace_v1.n8n
-terraform state rm kubernetes_namespace_v1.tunnel
-terraform state rm kubernetes_persistent_volume_claim_v1.n8n_data
+# 2. Remove from OpenTofu state
+tofu state rm kubernetes_namespace_v1.n8n
+tofu state rm kubernetes_namespace_v1.tunnel
+tofu state rm kubernetes_persistent_volume_claim_v1.n8n_data
 
 # 3. Manually delete Kubernetes resources
 kubectl delete ns n8n tunnel

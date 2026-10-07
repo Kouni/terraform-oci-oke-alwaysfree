@@ -43,13 +43,13 @@ echo ""
 
 echo "[*] Verifying NFS provisioner is ready..."
 if ! kubectl get storageclass nfs >/dev/null 2>&1; then
-  echo "[ERROR] StorageClass 'nfs' not found. Run 'terraform apply' first."
+  echo "[ERROR] StorageClass 'nfs' not found. Run 'tofu apply' first."
   exit 1
 fi
 NFS_POD=$(kubectl get pod -n nfs-storage -l app=nfs-server-provisioner \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 if [ -z "${NFS_POD}" ]; then
-  echo "[ERROR] nfs-server-provisioner Pod not found. Run 'terraform apply' first."
+  echo "[ERROR] nfs-server-provisioner Pod not found. Run 'tofu apply' first."
   exit 1
 fi
 echo "   [OK] NFS provisioner: ${NFS_POD}"
@@ -85,7 +85,7 @@ restore_pvc() {
     return 0
   fi
   if ! kubectl get pvc "${pvc_name}" -n "${ns}" >/dev/null 2>&1; then
-    echo "   [ERROR] PVC ${ns}/${pvc_name} not found — skipping (run 'terraform apply' first)"
+    echo "   [ERROR] PVC ${ns}/${pvc_name} not found — skipping (run 'tofu apply' first)"
     return 1
   fi
 

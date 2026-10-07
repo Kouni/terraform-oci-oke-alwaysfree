@@ -1,6 +1,6 @@
 # Terraform OCI OKE Always Free
 
-Terraform module to deploy an OKE (Oracle Kubernetes Engine) cluster using only OCI Always Free tier resources.
+OpenTofu module to deploy an OKE (Oracle Kubernetes Engine) cluster using only OCI Always Free tier resources.
 
 ## Architecture
 
@@ -88,10 +88,10 @@ The following resources are **NOT** Always Free and will incur charges:
 - **Load Balancer**: OCI Always Free includes **1** flexible Load Balancer (10 Mbps). Creating a second Kubernetes Service of type `LoadBalancer` will incur charges (~$10–30/month). This module uses `ClusterIP` + Cloudflare Tunnel for ingress — no LB required. If you do create a `LoadBalancer` Service, limit to exactly one
 
 > [!WARNING]
-> **Avoid `Service.type=LoadBalancer` unless you intend to consume the single free LB slot.** OKE provisions a real OCI Load Balancer for every such Service. The first one consumes the Always Free slot; any additional one is billed (~$10–30/month) and is not blocked by Terraform — guard this at the Kubernetes layer (RBAC, OPA/Kyverno, or simple convention) if untrusted operators have cluster access.
+> **Avoid `Service.type=LoadBalancer` unless you intend to consume the single free LB slot.** OKE provisions a real OCI Load Balancer for every such Service. The first one consumes the Always Free slot; any additional one is billed (~$10–30/month) and is not blocked by OpenTofu — guard this at the Kubernetes layer (RBAC, OPA/Kyverno, or simple convention) if untrusted operators have cluster access.
 
 > [!CAUTION]
-> **Sensitive values in Terraform state** — `terraform.tfstate` contains secrets such as `n8n_encryption_key` and `cloudflare_tunnel_token` in plaintext. **Never commit state files to version control.** For production use, configure a [remote backend](https://developer.hashicorp.com/terraform/language/backend) with encryption at rest (e.g., OCI Object Storage with SSE). Consider using [OCI Vault](https://docs.oracle.com/en-us/iaas/Content/KeyManagement/home.htm) or [SOPS](https://github.com/getsops/sops) for external secret management.
+> **Sensitive values in OpenTofu state** — `terraform.tfstate` contains secrets such as `n8n_encryption_key` and `cloudflare_tunnel_token` in plaintext. **Never commit state files to version control.** For production use, configure a [remote backend](https://opentofu.org/docs/language/settings/backends/configuration/) with encryption at rest (e.g., OCI Object Storage with SSE). Consider using [OCI Vault](https://docs.oracle.com/en-us/iaas/Content/KeyManagement/home.htm) or [SOPS](https://github.com/getsops/sops) for external secret management.
 
 ## Security Notes
 
@@ -121,12 +121,12 @@ The NFS server runs in its own `nfs-storage` namespace, isolated from applicatio
 The bundled `nfs-server-provisioner` chart runs as **a single StatefulSet replica** and cannot be scaled horizontally — NFS-Ganesha does not support active-active replication. This is an intentional architectural trade-off for an Always Free single-node cluster, not a bug:
 
 - During NFS pod restarts (chart upgrade, node eviction, OOM kill) every workload that mounts an NFS PVC will see I/O errors until the pod becomes Ready again.
-- Conservative CPU/memory limits are applied via Terraform Helm values to keep the privileged NFS server from starving the rest of the node.
+- Conservative CPU/memory limits are applied via OpenTofu Helm values to keep the privileged NFS server from starving the rest of the node.
 - For higher availability, switch to a managed file storage service (OCI File Storage, Filesystem-as-a-Service) — those are not part of the Always Free tier and are out of scope for this module.
 
 ### Observability Stack
 
-The Prometheus + Loki + Alloy stack documented under `docs/guides/observability.md` and `k8s/monitoring/` is **not** managed by this Terraform configuration. It is installed manually (Helm + `kubectl apply`) and intentionally kept out of the module to avoid coupling cluster lifecycle with monitoring lifecycle. Treat that directory as reference material; running `terraform destroy` will not uninstall the monitoring stack and `terraform apply` will not reconcile drift in it.
+The Prometheus + Loki + Alloy stack documented under `docs/guides/observability.md` and `k8s/monitoring/` is **not** managed by this OpenTofu configuration. It is installed manually (Helm + `kubectl apply`) and intentionally kept out of the module to avoid coupling cluster lifecycle with monitoring lifecycle. Treat that directory as reference material; running `tofu destroy` will not uninstall the monitoring stack and `tofu apply` will not reconcile drift in it.
 
 ## Backup & Disaster Recovery
 
@@ -140,13 +140,13 @@ Back up n8n data before a full destroy:
 # 2. Destroy all resources using the safe wrapper.
 #    This first deletes PVCs via kubectl (so the CSI driver can clean up
 #    the OCI Block Volume backing the NFS server), then removes helm/kubernetes
-#    resources from state, and finally runs terraform destroy.
+#    resources from state, and finally runs tofu destroy.
 bash scripts/destroy.sh
 ```
 
 ## Prerequisites
 
-- [Terraform](https://www.terraform.io/downloads) >= 1.5.0
+- [OpenTofu](https://opentofu.org/docs/intro/install/) >= 1.6.0
 - [OCI CLI](https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm) configured
 - OCI PAYG (Pay-As-You-Go) account with Always Free resources available
 - `kubectl` for cluster interaction
@@ -161,12 +161,12 @@ cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your OCI credentials
 
 # 2. Deploy
-terraform init
-terraform plan
-terraform apply
+tofu init
+tofu plan
+tofu apply
 
 # 3. Configure kubectl
-$(terraform output -raw kubeconfig_command)
+$(tofu output -raw kubeconfig_command)
 
 # 4. Verify
 kubectl get nodes
@@ -234,7 +234,7 @@ kubectl get nodes
 
 ## Cloudflare Zero Trust Tunnel Setup
 
-Cloudflare Tunnel is managed entirely via Terraform. Namespaces, secrets, and the `cloudflared` Deployment are all declared in root `main.tf` — no manual `kubectl apply` required.
+Cloudflare Tunnel is managed entirely via OpenTofu. Namespaces, secrets, and the `cloudflared` Deployment are all declared in root `main.tf` — no manual `kubectl apply` required.
 
 - See [k8s/README.md](k8s/README.md) for n8n + Cloudflare Tunnel deployment details and troubleshooting.
 - See [docs/guides/observability.md](docs/guides/observability.md) for the optional Prometheus + Loki + Alloy monitoring stack.
@@ -249,7 +249,7 @@ Cloudflare Tunnel is managed entirely via Terraform. Namespaces, secrets, and th
 #    n8n_encryption_key       = "$(openssl rand -hex 32)"  # generate once; never rotate
 
 # 2. Deploy
-terraform apply
+tofu apply
 ```
 
 This approach eliminates the need for inbound ports, providing security through Cloudflare's Zero Trust network.

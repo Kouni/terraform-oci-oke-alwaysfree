@@ -55,13 +55,15 @@ prometheus:
 grafana:
   enabled: true
 
+  # Steady-state working set is ~310–490 Mi; bursts from public scanners pushed it
+  # past the previous 768 Mi limit and triggered a SIGKILL (exit 137).
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 1Gi
 
   nodeSelector:
     kubernetes.io/arch: arm64
@@ -115,6 +117,34 @@ grafana:
   # via Grafana UI (Profile → Change password) or supply at install time with:
   #   helm upgrade ... --set grafana.adminPassword='<strong-password>'
   # Do NOT commit a plaintext password here.
+
+# ──────────────── Custom Alert Rules ────────────────
+# The default KubePodCrashLooping rule only fires on sustained restart loops.
+# These rules catch one-off restarts, such as a SIGKILL during a memory burst.
+additionalPrometheusRulesMap:
+  container-restarts:
+    groups:
+      - name: container-restarts
+        rules:
+          - alert: ContainerSigKilled
+            # Exit code 137 = SIGKILL: cgroup OOM kill (even when the runtime reports
+            # reason=Error instead of OOMKilled) or a liveness-probe kill.
+            expr: |
+              (kube_pod_container_status_last_terminated_exitcode == 137)
+              and on (namespace, pod, container)
+              (increase(kube_pod_container_status_restarts_total[15m]) > 0)
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} was SIGKILLed"
+              description: "Exit code 137 within the last 15 minutes. Check memory working set against the limit and liveness probe results."
+          - alert: ContainerRestarted
+            expr: increase(kube_pod_container_status_restarts_total[1h]) > 0
+            labels:
+              severity: info
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} restarted"
+              description: "{{ $value | humanize }} restart(s) in the last hour. Inspect with: kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous"
 
 # ──────────────── AlertManager ────────────────
 alertmanager:
