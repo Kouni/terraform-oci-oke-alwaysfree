@@ -92,6 +92,10 @@ grafana:
       # Grafana is reachable from the public internet through the Cloudflare Tunnel.
       disable_login: true
       disable_login_form: true
+      # Sign out also ends the Cloudflare Access session. Access revokes the
+      # session for all Access applications (no per-app logout exists); using
+      # the app domain clears the grafana.kouni.io cookie immediately.
+      signout_redirect_url: https://grafana.kouni.io/cdn-cgi/access/logout
     auth.basic:
       # Reject HTTP Basic auth on the API so the admin password cannot be
       # used remotely even if it leaks.
