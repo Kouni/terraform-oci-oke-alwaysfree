@@ -198,8 +198,8 @@ resource "kubernetes_storage_class_v1" "oci_bv_xfs" {
 # Monitoring (Prometheus + Grafana)
 # ──────────────────────────────────────────────────────────────────────────────
 # kube-prometheus-stack is installed via Helm (manual kubectl apply or helm install).
-# This resource manages the monitoring namespace lifecycle and provides the
-# Kubernetes Secret for Grafana Google OAuth credentials.
+# These resources manage the monitoring namespace lifecycle and provide the
+# Kubernetes Secrets for Grafana Google OAuth and admin credentials.
 
 resource "kubernetes_namespace_v1" "monitoring" {
   metadata {
@@ -271,6 +271,69 @@ resource "terraform_data" "restart_grafana_on_secret_change" {
   }
 
   depends_on = [kubernetes_secret_v1.grafana_google_oauth]
+}
+
+# Grafana admin credentials. The Helm values reference this Secret via
+# grafana.admin.existingSecret, so the password never appears in values files,
+# --set flags, or shell history. Rotate with:
+#   tofu apply -replace=random_password.grafana_admin
+resource "random_password" "grafana_admin" {
+  length  = 32
+  special = false
+}
+
+resource "kubernetes_secret_v1" "grafana_admin" {
+  metadata {
+    name      = "grafana-admin"
+    namespace = kubernetes_namespace_v1.monitoring.metadata[0].name
+    labels = {
+      "alwaysfree" = "true"
+    }
+  }
+
+  type = "Opaque"
+
+  data = {
+    admin-user     = "admin"
+    admin-password = random_password.grafana_admin.result
+  }
+
+  depends_on = [kubernetes_namespace_v1.monitoring]
+}
+
+# Grafana reads the admin password from the environment only when it first
+# initialises its database; later changes to the Secret are ignored. Push the
+# new password into the existing database with `grafana cli` whenever it
+# rotates. Skipped when kube-prometheus-stack is not installed yet.
+resource "terraform_data" "sync_grafana_admin_password" {
+  triggers_replace = sha256(random_password.grafana_admin.result)
+
+  provisioner "local-exec" {
+    environment = {
+      GRAFANA_ADMIN_PASSWORD = random_password.grafana_admin.result
+    }
+    command = <<-EOT
+      set -e
+      KUBECONFIG_TMP="$(mktemp /tmp/oke-kubeconfig-XXXXXX.yaml)"
+      trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+      oci ce cluster create-kubeconfig \
+        --cluster-id ${module.oke.cluster_id} \
+        --region ${split(".", module.oke.cluster_id)[3]} \
+        --token-version 2.0.0 \
+        --kube-endpoint PUBLIC_ENDPOINT \
+        --file "$KUBECONFIG_TMP"
+      export KUBECONFIG="$KUBECONFIG_TMP"
+      if ! kubectl -n monitoring get deployment kube-prometheus-stack-grafana >/dev/null 2>&1; then
+        echo "Grafana is not installed; the password is applied on first database init."
+        exit 0
+      fi
+      printf '%s' "$GRAFANA_ADMIN_PASSWORD" | kubectl -n monitoring exec -i \
+        deployment/kube-prometheus-stack-grafana -c grafana -- \
+        grafana cli admin reset-admin-password --password-from-stdin
+    EOT
+  }
+
+  depends_on = [kubernetes_secret_v1.grafana_admin]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
