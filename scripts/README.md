@@ -9,9 +9,9 @@ Safely tears down the infrastructure without leaving orphaned OCI Block Volumes.
 - **Orphaned OCI Block Volume**: Helm uninstall reports completion once Kubernetes objects are marked for deletion, but the CSI driver's `DeleteVolume` OCI API call is still in-flight. If the node pool is destroyed immediately after, the CSI controller pod is killed and the OCI Block Volume is never deleted. This script first deletes namespaces via `kubectl --wait=true`, which blocks until namespace deletion is fully complete (confirming the OCI volume deletion), before the node pool is touched.
 - **Provider timeout**: Helm/Kubernetes provider **context deadline exceeded** when the OKE API server becomes unreachable after nodes are terminated. Resolved by removing helm/kubernetes resources from state before OCI teardown.
 
-OCI deletes all in-cluster resources (namespaces, PVCs, Deployments, Helm releases) automatically when the OKE cluster is destroyed — Terraform does not need to manage their individual deletion.
+OCI deletes all in-cluster resources (namespaces, PVCs, Deployments, Helm releases) automatically when the OKE cluster is destroyed — OpenTofu does not need to manage their individual deletion.
 
-**Requires**: `terraform`
+**Requires**: `tofu`
 
 ```bash
 bash scripts/destroy.sh               # interactive confirmation
@@ -20,7 +20,7 @@ bash scripts/destroy.sh -auto-approve # non-interactive
 
 ## backup-n8n.sh
 
-Backs up all Kubernetes Secrets (n8n, tunnel, monitoring, tailscale namespaces), n8n SQLite database, all Helm release values, and Terraform config (`terraform.tfvars`, `terraform.tfstate`) to `backups/<TIMESTAMP>/`.
+Backs up all Kubernetes Secrets (n8n, tunnel, monitoring, tailscale namespaces), n8n SQLite database, all Helm release values, and OpenTofu config (`terraform.tfvars`, `terraform.tfstate`) to `backups/<TIMESTAMP>/`.
 
 ```bash
 ./scripts/backup-n8n.sh
@@ -65,9 +65,9 @@ for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
 ```bash
 # 1. Restore terraform config and rebuild cluster
 cp backups/<TIMESTAMP>/terraform/terraform.tfvars .
-terraform apply
+tofu apply
 
-# 2. Restore K8s Secrets (Terraform already recreates most, but apply backup to override)
+# 2. Restore K8s Secrets (OpenTofu already recreates most, but apply backup to override)
 for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
 
 # 3. Restore NFS PVC data

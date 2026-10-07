@@ -3,7 +3,7 @@
 # Complete Backup Script
 #
 # Backs up all K8s Secrets, n8n SQLite database, all Helm release values, and
-# Terraform config to backups/<TIMESTAMP>/. Run backup-nfs-data.sh separately
+# OpenTofu config to backups/<TIMESTAMP>/. Run backup-nfs-data.sh separately
 # for NFS PVC data (requires n8n scale-down).
 #
 # Backup files contain sensitive data. Store them securely.
@@ -98,9 +98,9 @@ EOF
 } >> "${KEYS_FILE}"
 echo "   [OK] plaintext-keys.txt"
 
-# ──────────────── Backup Terraform config ────────────────
+# ──────────────── Backup OpenTofu config ────────────────
 echo ""
-echo "[*] Backing up Terraform config..."
+echo "[*] Backing up OpenTofu config..."
 if [ -f "${REPO_DIR}/terraform.tfvars" ]; then
   cp "${REPO_DIR}/terraform.tfvars" "${BACKUP_SUBDIR}/terraform/terraform.tfvars"
   echo "   [OK] terraform.tfvars"
@@ -177,6 +177,6 @@ echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
 echo ""
 echo "   Restore (new cluster):"
 echo "      cp \"${BACKUP_SUBDIR}/terraform/terraform.tfvars\" ."
-echo "      terraform apply"
+echo "      tofu apply"
 echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do kubectl apply -f \"\$f\"; done"
 echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"

@@ -12,8 +12,8 @@
 
 ## Checklist
 
-- [ ] `terraform fmt -recursive` passes
-- [ ] `terraform validate` passes (`terraform init -backend=false` first)
+- [ ] `tofu fmt -recursive` passes
+- [ ] `tofu validate` passes (`tofu init -backend=false` first)
 - [ ] `terraform.tfvars.example` updated (if new variables were added)
 - [ ] `README.md` variables table updated (if variables changed)
 - [ ] Branch name follows Conventional Commits convention (e.g., `feat/...`, `fix/...`)

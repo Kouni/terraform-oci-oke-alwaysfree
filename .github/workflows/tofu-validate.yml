@@ -1,0 +1,33 @@
+name: OpenTofu Validation
+
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - "**.tfvars.example"
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: fmt + validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "~1.12"
+
+      - name: OpenTofu Format Check
+        run: tofu fmt -check -recursive
+
+      - name: OpenTofu Init
+        run: tofu init -backend=false
+
+      - name: OpenTofu Validate
+        run: tofu validate

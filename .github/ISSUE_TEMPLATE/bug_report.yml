@@ -22,7 +22,7 @@ body:
       description: How can we reproduce the issue?
       placeholder: |
         1. Set variables: `node_count = 2`, `enable_nfs_storage = true`
-        2. Run `terraform apply`
+        2. Run `tofu apply`
         3. Error occurs at resource `...`
     validations:
       required: true
@@ -43,10 +43,10 @@ body:
       render: shell
 
   - type: input
-    id: terraform_version
+    id: tofu_version
     attributes:
-      label: Terraform version
-      placeholder: "e.g. 1.7.5"
+      label: OpenTofu version
+      placeholder: "e.g. 1.12.6"
     validations:
       required: true
 
@@ -55,7 +55,7 @@ body:
     attributes:
       label: OCI provider version
       description: Found in `.terraform.lock.hcl`
-      placeholder: "e.g. 5.36.0"
+      placeholder: "e.g. 8.22.0"
 
   - type: input
     id: oci_region

@@ -277,7 +277,7 @@ resource "terraform_data" "restart_grafana_on_secret_change" {
 # NFS Storage
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Namespace is managed explicitly so that Terraform controls its lifecycle.
+# Namespace is managed explicitly so that OpenTofu controls its lifecycle.
 # The Helm release sets create_namespace = false and depends on this resource,
 # which guarantees the namespace exists before chart installation and — crucially —
 # is NOT deleted until after the Helm release is fully destroyed.
@@ -291,24 +291,24 @@ resource "kubernetes_namespace_v1" "nfs_storage" {
   depends_on = [terraform_data.wait_for_nodes]
 }
 
-# Explicit Terraform-managed PVC for the NFS server's backing OCI Block Volume.
+# Explicit OpenTofu-managed PVC for the NFS server's backing OCI Block Volume.
 #
 # Why explicit rather than letting the Helm chart create it:
 # The Helm chart uses a StatefulSet volumeClaimTemplate, which creates a PVC that
-# Terraform has no visibility into. On destroy, Helm uninstall signals Kubernetes
+# OpenTofu has no visibility into. On destroy, Helm uninstall signals Kubernetes
 # to delete the StatefulSet but returns immediately — the CSI driver's DeleteVolume
 # gRPC call (which deletes the OCI Block Volume via OCI API) is still in-flight.
-# Terraform then destroys the node pool, killing the CSI controller pod, aborting
+# OpenTofu then destroys the node pool, killing the CSI controller pod, aborting
 # the API call, and leaving a 136 GB orphaned OCI Block Volume.
 #
-# With an explicit PVC, Terraform's kubernetes provider destroy BLOCKS until the
+# With an explicit PVC, OpenTofu's kubernetes provider destroy BLOCKS until the
 # PVC object is fully removed from the API server — which only happens after the
 # CSI driver confirms the OCI Block Volume is deleted. This guarantees no orphans.
 #
 # Destroy order enforced by depends_on on the Helm release:
 #   helm_release.nfs_server_provisioner  (Helm uninstall: NFS pod stops,
 #     ↓                                   pvc-protection finalizer clears)
-#   kubernetes_persistent_volume_claim_v1.nfs_backing  (Terraform blocks ~30s
+#   kubernetes_persistent_volume_claim_v1.nfs_backing  (OpenTofu blocks ~30s
 #     ↓                                                 until OCI volume deleted)
 #   module.oke (node pool)               (OCI Block Volume is already gone)
 resource "kubernetes_persistent_volume_claim_v1" "nfs_backing" {
@@ -402,9 +402,9 @@ resource "helm_release" "nfs_server_provisioner" {
 
   # depends_on on the PVC (not just storage_class) is the key to correct destroy
   # ordering: Helm release is destroyed first (stops the NFS pod so
-  # pvc-protection finalizer clears), then the PVC resource is destroyed (Terraform
+  # pvc-protection finalizer clears), then the PVC resource is destroyed (OpenTofu
   # blocks until CSI confirms the OCI Block Volume is deleted), and only then does
-  # Terraform proceed to destroy the node pool.
+  # OpenTofu proceed to destroy the node pool.
   depends_on = [
     terraform_data.wait_for_nodes,
     kubernetes_persistent_volume_claim_v1.nfs_backing,
@@ -505,7 +505,7 @@ resource "kubernetes_persistent_volume_claim_v1" "n8n_data" {
   lifecycle {
     # Ignore only the fields the controller mutates after binding so legitimate
     # in-place changes (e.g. requests.storage when expanding) are not silently
-    # dropped by Terraform.
+    # dropped by OpenTofu.
     ignore_changes = [
       spec[0].volume_name,
       spec[0].selector,
@@ -632,7 +632,7 @@ resource "helm_release" "n8n" {
     database  = { type = "sqlite", useExternal = false }
     redis     = { enabled = false }
 
-    # Persistent storage — uses Terraform-managed PVC so data survives helm uninstall
+    # Persistent storage — uses OpenTofu-managed PVC so data survives helm uninstall
     persistence = {
       enabled       = true
       existingClaim = kubernetes_persistent_volume_claim_v1.n8n_data[0].metadata[0].name
@@ -662,8 +662,8 @@ resource "helm_release" "n8n" {
     # Resources (ARM A1.Flex, leave room for other workloads)
     resources = {
       main = {
-        requests = { cpu = "100m", memory = "256Mi" }
-        limits   = { cpu = "500m", memory = "512Mi" }
+        requests = { cpu = "250m", memory = "512Mi" }
+        limits   = { cpu = "800m", memory = "1Gi" }
       }
     }
 
@@ -855,7 +855,7 @@ resource "helm_release" "tailscale_operator" {
 # (rather than kubernetes_manifest) avoids plan-time CRD validation failures
 # when the operator has not yet been installed.
 #
-# triggers_replace causes Terraform to re-apply the Connector whenever the
+# triggers_replace causes OpenTofu to re-apply the Connector whenever the
 # hostname or advertised routes change, so drift is corrected automatically.
 resource "terraform_data" "tailscale_connector" {
   count = var.enable_tailscale ? 1 : 0

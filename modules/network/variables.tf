@@ -47,12 +47,12 @@ variable "enable_nat_gateway" {
     then run full apply during a maintenance window (Phase B):
 
       # Phase A — build NAT resources, no downtime
-      terraform apply \
+      tofu apply \
         -target=module.network.oci_core_public_ip.nat_gw \
         -target=module.network.oci_core_nat_gateway.this
 
       # Phase B — full apply, worker subnet + nodes recreated
-      terraform apply
+      tofu apply
   EOT
   type        = bool
   default     = false

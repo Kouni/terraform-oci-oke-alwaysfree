@@ -47,13 +47,13 @@ notification_email    = "you@example.com"
 # Use two-phase apply to build NAT first, then change subnet during maintenance:
 #
 #   # Phase A — no downtime, just creates NAT resources
-#   terraform apply \
+#   tofu apply \
 #     -target=module.network.oci_core_public_ip.nat_gw \
 #     -target=module.network.oci_core_nat_gateway.this
-#   terraform output nat_gateway_public_ip  # confirm fixed IP
+#   tofu output nat_gateway_public_ip  # confirm fixed IP
 #
 #   # Phase B — worker subnet + nodes recreated (~15 min downtime)
-#   terraform apply
+#   tofu apply
 #
 # enable_nat_gateway = true
 #

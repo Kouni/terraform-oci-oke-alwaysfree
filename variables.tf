@@ -223,7 +223,7 @@ variable "n8n_pvc_size" {
 }
 
 variable "n8n_secret_name" {
-  description = "Name of the K8s Secret (managed by Terraform) containing N8N_ENCRYPTION_KEY, N8N_HOST, N8N_PORT, N8N_PROTOCOL"
+  description = "Name of the K8s Secret (managed by OpenTofu) containing N8N_ENCRYPTION_KEY, N8N_HOST, N8N_PORT, N8N_PROTOCOL"
   type        = string
   default     = "n8n-secrets"
 }
@@ -242,7 +242,7 @@ variable "n8n_host" {
 }
 
 variable "cloudflared_secret_name" {
-  description = "Name of the K8s Secret (managed by Terraform) containing TUNNEL_TOKEN for Cloudflare Zero Trust Tunnel"
+  description = "Name of the K8s Secret (managed by OpenTofu) containing TUNNEL_TOKEN for Cloudflare Zero Trust Tunnel"
   type        = string
   default     = "cloudflare-tunnel"
 }

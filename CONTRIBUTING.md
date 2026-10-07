@@ -19,7 +19,7 @@ Thank you for your interest in contributing! This document describes how to set 
 
 | Tool | Minimum Version | Notes |
 |------|----------------|-------|
-| [Terraform](https://developer.hashicorp.com/terraform/install) | 1.5.0 | Required for `terraform_data` resource |
+| [OpenTofu](https://opentofu.org/docs/intro/install/) | 1.6.0 | Required for `terraform_data` resource |
 | [OCI CLI](https://docs.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm) | latest | Required for kubeconfig generation |
 | [kubectl](https://kubernetes.io/docs/tasks/tools/) | 1.29+ | For cluster interaction |
 
@@ -33,13 +33,13 @@ Thank you for your interest in contributing! This document describes how to set 
 
 ```bash
 # Format check
-terraform fmt -check -recursive
+tofu fmt -check -recursive
 
 # Initialize providers (skips backend)
-terraform init -backend=false
+tofu init -backend=false
 
 # Validate configuration
-terraform validate
+tofu validate
 ```
 
 ---
@@ -51,7 +51,7 @@ terraform validate
 ├── main.tf                    # Root module: validation guard, cluster add-ons, app deployments
 ├── variables.tf               # All input variables with validation rules
 ├── outputs.tf                 # Root outputs
-├── versions.tf                # Provider and Terraform version constraints
+├── versions.tf                # Provider and OpenTofu version constraints
 ├── terraform.tfvars.example   # Example variable values
 ├── modules/
 │   ├── network/               # VCN, subnets, gateways, security lists
@@ -89,12 +89,12 @@ git checkout -b feat/your-feature
 
 # 2. Make your changes
 
-# 3. Format all Terraform files
-terraform fmt -recursive
+# 3. Format all OpenTofu files
+tofu fmt -recursive
 
 # 4. Validate the configuration
-terraform init -backend=false
-terraform validate
+tofu init -backend=false
+tofu validate
 
 # 5. Commit with Conventional Commits message
 git commit -m "feat(network): add optional NAT gateway toggle"
@@ -104,7 +104,7 @@ git commit -m "feat(network): add optional NAT gateway toggle"
 
 This project manages real OCI infrastructure. For changes that affect resources:
 
-1. Run `terraform plan` against a dedicated test compartment — **never against a production compartment**
+1. Run `tofu plan` against a dedicated test compartment — **never against a production compartment**
 2. Verify the plan shows only expected changes
 3. Check the `terraform_data.always_free_validation` preconditions pass
 
@@ -114,8 +114,8 @@ For documentation-only changes, validation (`fmt -check` + `validate`) is suffic
 
 ## Submitting a Pull Request
 
-1. Ensure `terraform fmt -check -recursive` passes
-2. Ensure `terraform validate` passes (with `terraform init -backend=false`)
+1. Ensure `tofu fmt -check -recursive` passes
+2. Ensure `tofu validate` passes (with `tofu init -backend=false`)
 3. Update `terraform.tfvars.example` if you added new variables
 4. Update `README.md` variables table if you added or changed variables
 5. Open a PR against `main` — the CI workflow will run automatically
@@ -149,7 +149,7 @@ When opening an issue, please use the appropriate template:
 - **Bug Report** — for unexpected behavior or errors
 - **Feature Request** — for new functionality or improvements
 
-Include as much context as possible: OCI region, Terraform version, relevant variable values (redact sensitive data), and the full error output.
+Include as much context as possible: OCI region, OpenTofu version, relevant variable values (redact sensitive data), and the full error output.
 
 ---
 
