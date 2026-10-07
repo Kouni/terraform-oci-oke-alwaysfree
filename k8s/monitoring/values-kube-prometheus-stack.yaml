@@ -87,9 +87,15 @@ grafana:
       # Mark session cookies as Secure since external traffic arrives over HTTPS
       cookie_secure: true
     auth:
-      # Hide the username/password form — all logins go through Google OAuth.
-      # Admin escape hatch: /login?disableAutoLogin still accepts password login.
+      # Google OAuth is the only sign-in method. Built-in username/password
+      # login (form and POST /login API) is disabled because Grafana is
+      # reachable from the public internet through the Cloudflare Tunnel.
+      disable_login: true
       disable_login_form: true
+    auth.basic:
+      # Reject HTTP Basic auth on the API so the admin password cannot be
+      # used remotely even if it leaks.
+      enabled: false
     auth.google:
       enabled: true
       # Credentials are injected from the grafana-google-oauth Kubernetes Secret
@@ -106,17 +112,53 @@ grafana:
       allow_sign_up: true
       # Skip the Grafana login page and redirect straight to Google
       auto_login: true
-      # New Google-authenticated users are assigned the Viewer role (read-only).
-      # Promote specific users to Editor / Admin via Grafana UI → Administration → Users.
-      role_attribute_path: "'Viewer'"
+      # Role is re-evaluated on every sign-in. Listed accounts become Grafana
+      # server admins (password login is disabled, so this is the only admin
+      # path); every other account is Viewer (read-only).
+      role_attribute_path: "contains(['kouni@lcse.org'], email) && 'GrafanaAdmin' || 'Viewer'"
+      allow_assign_grafana_admin: true
   # Inject Google OAuth credentials from the grafana-google-oauth Kubernetes Secret.
   # The secret must exist before running helm upgrade:
   #   kubectl apply -f k8s/monitoring/secret-grafana-google-oauth.yaml
   envFromSecret: grafana-google-oauth
-  # admin password: chart default is "prom-operator" — change immediately after first login
-  # via Grafana UI (Profile → Change password) or supply at install time with:
-  #   helm upgrade ... --set grafana.adminPassword='<strong-password>'
-  # Do NOT commit a plaintext password here.
+  # Admin credentials come from the grafana-admin Secret, created by OpenTofu
+  # (random_password.grafana_admin in main.tf). Never set adminPassword here
+  # or via --set: the value would end up in shell history and Helm release data.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  # The sidecars call Grafana's reload API with the admin password over Basic
+  # auth, which is disabled above. Skip the API call: dashboards are picked up
+  # by the file provisioner; datasource changes take effect on pod restart.
+  # Do not enable initDashboards / initDatasources: the init containers inherit
+  # watchMethod WATCH and never exit, blocking the Pod in Init.
+  # Grafana is internet-facing, so its ServiceAccount token must not unlock
+  # cluster Secrets. Sidecars read ConfigMaps only, from the monitoring
+  # namespace only (null clears the kube-prometheus-stack default of ALL).
+  sidecar:
+    dashboards:
+      skipReload: true
+      resource: configmap
+      searchNamespace: null
+    datasources:
+      skipReload: true
+      resource: configmap
+  # The chart's built-in Role/ClusterRole always grants "secrets". Bind the
+  # ServiceAccount to the ConfigMap-only Role below instead.
+  rbac:
+    namespaced: true
+    useExistingRole: grafana-sidecar-configmaps
+  extraObjects:
+    - apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: grafana-sidecar-configmaps
+        namespace: monitoring
+      rules:
+        - apiGroups: [""]
+          resources: ["configmaps"]
+          verbs: ["get", "watch", "list"]
 
 # ──────────────── Custom Alert Rules ────────────────
 # The default KubePodCrashLooping rule only fires on sustained restart loops.
