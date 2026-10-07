@@ -198,6 +198,7 @@ sign in either.
 | Any other account | Rejected by the Access policy |
 | Promote user | Add the email to `role_attribute_path` in the Helm values (UI role changes are overwritten) |
 | Password login (form, `POST /login`, Basic auth) | Disabled |
+| Grafana **Sign out** | Redirects to `/cdn-cgi/access/logout` (`auth.signout_redirect_url`), revoking the Access session for **all** Access applications (n8n, Prometheus, …); Access has no per-app logout |
 
 ### Google OAuth (disabled fallback)
 
