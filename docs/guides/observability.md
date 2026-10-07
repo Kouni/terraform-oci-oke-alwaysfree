@@ -120,41 +120,47 @@ In the **Cloudflare Zero Trust Dashboard** → Networks → Tunnels → your tun
 
 Grafana is already configured with `root_url: https://grafana.kouni.io` and `cookie_secure: true`.
 
-Verify: open `https://grafana.kouni.io` — it redirects to Google sign-in (see [Google OAuth](#google-oauth-single-sign-on)).
+Verify: open `https://grafana.kouni.io` — it redirects to Cloudflare Access (see [Sign-in](#sign-in-cloudflare-access-jwt)).
 
 ### Cloudflare Access (edge authentication)
 
-Grafana's Google OAuth protects data, but every unauthenticated request still reaches
-the Grafana pod. Automated scanners probing paths such as `/.env` or
-`/terraform.tfstate` have caused memory bursts large enough to SIGKILL the container.
-Cloudflare Access blocks these requests at the edge, before they enter the tunnel.
+Cloudflare Access is the only sign-in path. Unauthenticated requests are blocked at
+the edge and never reach the Grafana pod, which also stops scanner traffic (probes
+for `/.env` or `/terraform.tfstate` previously caused memory bursts large enough to
+SIGKILL the container).
 
 In the **Cloudflare Zero Trust Dashboard**:
 
-1. **Settings → Authentication → Login methods**: add **Google** (or use One-time PIN).
-2. **Access → Applications → Add an application → Self-hosted**:
+1. **Settings → Authentication → Login methods**: add **Google**.
+2. **Access → Applications → Add an application → Self-hosted and private → Public DNS**:
 
-   | Field              | Value                    |
-   |--------------------|--------------------------|
-   | Application domain | `grafana.kouni.io`       |
-   | Session duration   | `24 hours`               |
-   | Identity providers | Google                   |
+   | Field                          | Value                            |
+   |--------------------------------|----------------------------------|
+   | Public hostname                | `grafana.kouni.io` (no path)     |
+   | Session duration               | `24 hours`                       |
+   | Identity providers             | Google only                      |
+   | Apply instant authentication   | On                               |
 
-3. Add a policy:
+3. Attach a policy:
 
-   | Field   | Value                          |
-   |---------|--------------------------------|
-   | Action  | `Allow`                        |
+   | Field   | Value                            |
+   |---------|----------------------------------|
+   | Action  | `Allow` (not `Bypass` — Bypass does not issue the JWT Grafana needs) |
    | Include | **Emails ending in** `@lcse.org` |
 
+4. **Networks → Tunnels → your tunnel → Public hostname `grafana.kouni.io` → Access**:
+   enable **Protect with Access** for the same application, so cloudflared itself
+   rejects requests without a valid Access token.
+
 Verify from an unauthenticated session; the response should be a redirect to
-`<team>.cloudflareaccess.com`, not Grafana:
+`kouni.cloudflareaccess.com`, not Grafana:
 
 ```bash
 curl -sI https://grafana.kouni.io/.env | grep -i '^location'
 ```
 
-Grafana's own Google OAuth stays enabled as the second layer and still assigns roles.
+The redirect URL also exposes the application's AUD tag as the `kid` query parameter.
+If the Access application is recreated, update `expect_claims` in the Helm values.
 
 ### Port-forward (local / fallback)
 
@@ -166,9 +172,39 @@ Grafana's own Google OAuth stays enabled as the second layer and still assigns r
 
 ## Initial Setup
 
-### Google OAuth (Single Sign-On)
+### Sign-in (Cloudflare Access JWT)
 
-Grafana is configured to use Google OAuth as the only sign-in method. Built-in password login (`auth.disable_login`) and HTTP Basic auth (`auth.basic.enabled: false`) are disabled, so the admin password cannot be used through the public URL.
+Users authenticate once, at Cloudflare Access (Google IdP). Access forwards every
+request with a signed `Cf-Access-Jwt-Assertion` header, and Grafana's `auth.jwt`
+signs the user in from it:
+
+| Setting          | Value                                                               |
+|------------------|---------------------------------------------------------------------|
+| `jwk_set_url`    | `https://kouni.cloudflareaccess.com/cdn-cgi/access/certs`           |
+| `expect_claims`  | `aud` = the Access application's AUD tag, `iss` = the team domain   |
+| User identity    | `email` claim (auto sign-up)                                        |
+| Role             | `role_attribute_path`, re-evaluated on every request                |
+
+Built-in password login (`auth.disable_login`) and HTTP Basic auth
+(`auth.basic.enabled: false`) are disabled, so the admin password cannot be used
+through the public URL. Port-forward access has no Access JWT and therefore cannot
+sign in either.
+
+| Scenario | Behaviour |
+|----------|-----------|
+| Visit `https://grafana.kouni.io` | Cloudflare Access → Google sign-in (once) → Grafana |
+| `@lcse.org` account | Account auto-created, role: **Viewer** |
+| Account listed in `role_attribute_path` | Role: **Grafana Admin** |
+| Any other account | Rejected by the Access policy |
+| Promote user | Add the email to `role_attribute_path` in the Helm values (UI role changes are overwritten) |
+| Password login (form, `POST /login`, Basic auth) | Disabled |
+
+### Google OAuth (disabled fallback)
+
+Grafana's own Google OAuth (`auth.google`) is disabled because it caused a second
+Google consent prompt after Access. Its configuration and the `grafana-google-oauth`
+Secret are kept so it can be re-enabled (`auth.google.enabled: true`,
+`auto_login: true`) if Cloudflare Access is ever removed. Setup reference:
 
 #### Step 1 — Create Google OAuth Client
 
@@ -204,17 +240,6 @@ helm upgrade --install kube-prometheus-stack \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
   --wait --timeout 10m
 ```
-
-#### Access behaviour after setup
-
-| Scenario | Behaviour |
-|----------|-----------|
-| Visit `https://grafana.kouni.io` | Auto-redirects to Google sign-in |
-| Sign in with `@lcse.org` account | Account auto-created, role: **Viewer** |
-| Sign in with an account listed in `role_attribute_path` | Role: **Grafana Admin** |
-| Sign in with non-`lcse.org` account | Rejected by Grafana |
-| Promote user | Add the email to `role_attribute_path` in the Helm values (roles are re-synced on every sign-in, so UI changes are overwritten) |
-| Password login (form, `POST /login`, Basic auth) | Disabled |
 
 ### Rotate Grafana admin password
 
