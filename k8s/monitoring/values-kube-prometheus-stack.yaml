@@ -2,7 +2,7 @@
 # Chart:   prometheus-community/kube-prometheus-stack
 # Cluster: OKE Always Free — ARM64 A1.Flex, NFS storage, single node
 # Scope:   Metrics + Alerting + Dashboards (Prometheus + Grafana + AlertManager)
-# Access:  Cloudflare Tunnel (grafana.kouni.io) + kubectl port-forward
+# Access:  Cloudflare Tunnel + Cloudflare Access (grafana.kouni.io) + kubectl port-forward
 #
 # Design principles:
 #   - All workloads pinned to ARM64 nodes (nodeSelector)
@@ -87,17 +87,39 @@ grafana:
       # Mark session cookies as Secure since external traffic arrives over HTTPS
       cookie_secure: true
     auth:
-      # Google OAuth is the only sign-in method. Built-in username/password
-      # login (form and POST /login API) is disabled because Grafana is
-      # reachable from the public internet through the Cloudflare Tunnel.
+      # Cloudflare Access (Google IdP) is the only sign-in method. Built-in
+      # username/password login (form and POST /login API) is disabled because
+      # Grafana is reachable from the public internet through the Cloudflare Tunnel.
       disable_login: true
       disable_login_form: true
     auth.basic:
       # Reject HTTP Basic auth on the API so the admin password cannot be
       # used remotely even if it leaks.
       enabled: false
-    auth.google:
+    auth.jwt:
+      # Cloudflare Access authenticates the user once (Google IdP) and attaches
+      # a signed JWT to every request it forwards through the tunnel. Grafana
+      # verifies the signature against the team JWKS and pins aud/iss to the
+      # grafana.kouni.io Access application, so tokens from other Access apps
+      # or forged headers are rejected.
       enabled: true
+      header_name: Cf-Access-Jwt-Assertion
+      email_claim: email
+      username_claim: email
+      jwk_set_url: https://kouni.cloudflareaccess.com/cdn-cgi/access/certs
+      cache_ttl: 60m
+      expect_claims: '{"aud": ["07bcfa0b127a54b703c54df59dc5e39af84bdc9a3090b9e3f6b4fb96ea4429f2"], "iss": "https://kouni.cloudflareaccess.com"}'
+      auto_sign_up: true
+      # Role is re-evaluated on every request. Listed accounts become Grafana
+      # server admins (password login is disabled, so this is the only admin
+      # path); every other account allowed by the Access policy is Viewer.
+      role_attribute_path: "contains(['kouni@lcse.org'], email) && 'GrafanaAdmin' || 'Viewer'"
+      allow_assign_grafana_admin: true
+    auth.google:
+      # Disabled: Cloudflare Access already authenticates with Google, and a
+      # second Grafana-side OAuth flow forced another consent prompt.
+      # Kept configured so it can be re-enabled if Access is removed.
+      enabled: false
       # Credentials are injected from the grafana-google-oauth Kubernetes Secret
       # (see k8s/monitoring/secret-grafana-google-oauth.yaml.example).
       client_id: ${GF_AUTH_GOOGLE_CLIENT_ID}
@@ -110,11 +132,6 @@ grafana:
       allowed_domains: lcse.org
       # Auto-create Grafana user on first Google sign-in
       allow_sign_up: true
-      # Skip the Grafana login page and redirect straight to Google
-      auto_login: true
-      # Role is re-evaluated on every sign-in. Listed accounts become Grafana
-      # server admins (password login is disabled, so this is the only admin
-      # path); every other account is Viewer (read-only).
       role_attribute_path: "contains(['kouni@lcse.org'], email) && 'GrafanaAdmin' || 'Viewer'"
       allow_assign_grafana_admin: true
   # Inject Google OAuth credentials from the grafana-google-oauth Kubernetes Secret.
