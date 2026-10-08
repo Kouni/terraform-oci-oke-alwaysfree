@@ -9,7 +9,7 @@
 #   - All persistent data on in-cluster NFS StorageClass
 #   - No LoadBalancer / Ingress — ClusterIP only; Cloudflare Tunnel for egress
 #   - Single replica everywhere (Always Free = no HA budget)
-#   - retentionSize stays 1 Gi below PVC size to prevent TSDB OOMKill
+#   - retentionSize stays ~10 % below the PVC quota so TSDB eviction runs before the volume fills
 
 # ──────────────── Global ────────────────
 commonLabels:
@@ -20,11 +20,14 @@ prometheus:
   prometheusSpec:
     replicas: 1
 
-    # Retention: 90 days by time; 4.5 GB by size (PVC is 5 Gi — 0.5 Gi buffer).
-    # Sizing basis: ~5050 active series (OCI infra only) × 30s interval × 1.5 B/sample
-    # ≈ 253 B/s → ~1.97 GB at 90d. retentionSize triggers auto-eviction before PVC fills.
-    retention: 90d
-    retentionSize: 4.5GB
+    # Retention: 180 days by time; 31 GiB by size. Prometheus size units are base-2, so "31GB"
+    # means 31 GiB. The PVC quota is 35 Gi, leaving ~4 GiB for compaction output (the largest
+    # block spans ~10 % of retention, ≈ 2.5 GB).
+    # Sizing basis (measured 2026-10): ~40k active series, ~1,400 samples/s × ~1.15 B/sample
+    # ≈ 140 MB/day → ~23.5 GiB at 180d; ×1.2 for series growth + ~1 GiB WAL ≈ 29 GiB → 31 GiB.
+    # retentionSize triggers auto-eviction before the PVC quota fills.
+    retention: 180d
+    retentionSize: 31GB
 
     # WAL compression reduces write-ahead log size by ~20 % at negligible CPU cost.
     walCompression: true
@@ -35,13 +38,15 @@ prometheus:
         memory: 512Mi
       limits:
         cpu: "1"
-        memory: 1.5Gi
+        memory: 2Gi
 
     # ARM64 nodes only
     nodeSelector:
       kubernetes.io/arch: arm64
 
-    # NFS-backed TSDB; StatefulSet volumeClaimTemplate — PVC is retained on helm uninstall
+    # NFS-backed TSDB; StatefulSet volumeClaimTemplate — PVC is retained on helm uninstall.
+    # The NFS provisioner has no resizer: changing this size does not expand the existing PVC.
+    # Follow "Resizing Prometheus Storage" in docs/guides/observability.md instead.
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -49,21 +54,22 @@ prometheus:
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
-              storage: 5Gi
+              storage: 35Gi
 
 # ──────────────── Grafana ────────────────
 grafana:
   enabled: true
 
   # Steady-state working set is ~310–490 Mi; bursts from public scanners pushed it
-  # past the previous 768 Mi limit and triggered a SIGKILL (exit 137).
+  # past the previous 768 Mi limit and triggered a SIGKILL (exit 137). 7-day peak later
+  # reached ~808 Mi; 1.5 Gi leaves headroom for long-range (180d) dashboard queries.
   resources:
     requests:
       cpu: 100m
       memory: 512Mi
     limits:
       cpu: 500m
-      memory: 1Gi
+      memory: 1.5Gi
 
   nodeSelector:
     kubernetes.io/arch: arm64
