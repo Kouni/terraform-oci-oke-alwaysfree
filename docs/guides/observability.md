@@ -17,8 +17,8 @@ grafana.kouni.io
        ▼
 ┌──────────────┐     ┌──────────────┐
 │  Prometheus  │────▶│ AlertManager │
-│ NFS PVC 15Gi │     │ NFS PVC 1Gi  │
-│ retention 30d│     │ retention 5d │
+│ NFS PVC 35Gi │     │ NFS PVC 1Gi  │
+│retention 180d│     │ retention 5d │
 └──────▲───────┘     └──────────────┘
        │ scrape
 ┌──────┴───────────────────────────┐
@@ -35,20 +35,29 @@ No Ingress / LoadBalancer — ClusterIP only.
 
 | Component    | PVC Size | Policy                                                        |
 |--------------|----------|---------------------------------------------------------------|
-| Prometheus   | 5 Gi     | `retentionSize=4.5GB`, `retention=90d`, WAL compression on   |
-| Grafana      | 2 Gi     | `helm.sh/resource-policy: keep` annotation                    |
-| AlertManager | 1 Gi     | `retention=120h` (5 days)                                     |
-| **Total**    | **8 Gi** | 6 % of 136 Gi NFS                                            |
+| Prometheus   | 35 Gi     | `retentionSize=31GB`, `retention=180d`, WAL compression on   |
+| Grafana      | 2 Gi      | `helm.sh/resource-policy: keep` annotation                    |
+| AlertManager | 1 Gi      | `retention=120h` (5 days)                                     |
+| **Total**    | **38 Gi** | 28 % of 136 Gi NFS                                            |
 
-Sizing basis: ~5050 active series (OCI infra only) × 30 s scrape interval ×
-1.5 B/sample ≈ 253 B/s → **~2 GB at 90 days** (61 % headroom in 5 Gi PVC).
+Sizing basis (measured 2026-10): ~40k active series (the `apiserver` job alone
+contributes ~27k samples per scrape), ~1,400 samples/s × ~1.15 B/sample ≈
+**~140 MB/day** → ~23.5 GiB at 180 days. Adding 20 % for series growth and
+~1 GiB for the WAL gives ~29 GiB, rounded up to `retentionSize=31GB`.
+Prometheus size units are base-2, so `31GB` means 31 GiB. That leaves ~4 GiB
+under the 35 Gi quota for compaction output. The largest block spans ~10 % of
+retention, about 2.5 GB.
+
+Whichever of `retention` and `retentionSize` is reached first wins. Check the
+effective retention with
+`time() - prometheus_tsdb_lowest_timestamp_seconds` (in seconds).
 
 ## Resource Budget
 
 | Component          | CPU Req | Mem Req | CPU Limit | Mem Limit |
 |--------------------|---------|---------|-----------|-----------|
-| Prometheus         | 300m    | 512 Mi  | 1000m     | 1.5 Gi    |
-| Grafana            | 100m    | 512 Mi  | 500m      | 1 Gi      |
+| Prometheus         | 300m    | 512 Mi  | 1000m     | 2 Gi      |
+| Grafana            | 100m    | 512 Mi  | 500m      | 1.5 Gi    |
 | AlertManager       | 50m     | 128 Mi  | 200m      | 256 Mi    |
 | kube-state-metrics | 50m     | 128 Mi  | 200m      | 256 Mi    |
 | node-exporter      | 50m     | 64 Mi   | 200m      | 128 Mi    |
@@ -315,6 +324,270 @@ helm upgrade kube-prometheus-stack \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
   --wait --timeout 10m
 ```
+
+### Resizing Prometheus Storage
+
+Resize the existing Prometheus PVC in place. Do not create a new SC, PV, or PVC.
+The example below grows the volume from 5 Gi to 35 Gi and extends retention
+from 90d to 180d.
+
+#### Why editing the PVC is not enough
+
+With a CSI-backed StorageClass, raising `spec.resources.requests.storage` on a
+PVC triggers the external resizer. The `nfs` StorageClass works differently:
+
+- **The real limit is an XFS project quota.** `nfs-provisioner` (v4.0.8)
+  creates one directory per PVC under `/export` on the NFS server and caps it
+  with an XFS project quota. The size on the PV and PVC is only metadata and does
+  not limit writes.
+- **There is no resizer.** The StorageClass reports
+  `allowVolumeExpansion: true`, but nothing acts on a resize. Patching the PVC
+  only emits an `ExternalExpanding` event and then stays pending.
+- **The provisioner re-applies quotas on startup.** It reads `/export/projects`
+  and resets every quota to the size stored there. If you change only the live
+  quota, the old size comes back on the next restart.
+- **A StatefulSet's `volumeClaimTemplates` are immutable.** Prometheus runs in
+  an operator-managed StatefulSet, so the template change must follow the
+  operator's documented resize flow.
+
+Five layers must end up consistent: **XFS quota → `/export/projects` → PV → PVC
+→ Prometheus CR / StatefulSet / Helm values**.
+
+#### Step 0 — Pre-checks and backups
+
+```bash
+kubectl config current-context
+
+PVC=prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0
+PV=$(kubectl -n monitoring get pvc "$PVC" -o jsonpath='{.spec.volumeName}')
+PROJECT_ID=$(kubectl get pv "$PV" -o jsonpath='{.metadata.annotations.Project_Id}')
+echo "$PV $PROJECT_ID"
+
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- xfs_quota -x -c 'report -p -h' /export
+
+mkdir -p temporary/prom-resize
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- cat /export/projects > temporary/prom-resize/projects.bak
+kubectl get pv "$PV" -o yaml > temporary/prom-resize/pv.yaml
+kubectl -n monitoring get pvc "$PVC" -o yaml > temporary/prom-resize/pvc.yaml
+kubectl -n monitoring get prometheus kube-prometheus-stack-prometheus -o yaml > temporary/prom-resize/cr.yaml
+kubectl get sc,pv -o name > temporary/prom-resize/before.txt
+kubectl get pvc -A --no-headers | awk '{print $1"/"$2}' >> temporary/prom-resize/before.txt
+
+# The live release must match the repo, or the upgrade will overwrite live-only changes
+diff <(helm -n monitoring get values kube-prometheus-stack -o json | jq -S .) \
+     <(yq -o json k8s/monitoring/values-kube-prometheus-stack.yaml | jq -S .)
+
+# PVCs must survive the StatefulSet deletion in Step 7 (expect Retain/Retain)
+kubectl -n monitoring get sts prometheus-kube-prometheus-stack-prometheus \
+  -o jsonpath='{.spec.persistentVolumeClaimRetentionPolicy}{"\n"}'
+```
+
+Every later step needs the PV name and project ID. The backups let you revert
+each layer separately.
+
+#### Step 1 — Size the volume
+
+Measure the current ingestion before you pick a number:
+
+```promql
+rate(prometheus_tsdb_head_samples_appended_total[1h])   # samples/s
+prometheus_tsdb_storage_blocks_bytes                     # current block size
+time() - prometheus_tsdb_lowest_timestamp_seconds        # effective retention (s)
+```
+
+- Daily growth = block size ÷ effective retention in days (~140 MB/day as of 2026-10).
+- `retentionSize` = days × daily growth × 1.2 (series growth) + ~1 GiB (WAL).
+- PVC quota = `retentionSize` + ~10 %. Compaction writes the new block before it
+  deletes the source blocks, so it needs temporary headroom.
+- **Prometheus size units are base-2.** `31GB` means 31 GiB (33.3e9 bytes).
+
+For 180 days: `retentionSize: 31GB`, quota 35 Gi = 35 × 1024³ = `37580963840` bytes.
+
+#### Step 2 — Update the values file
+
+Set `retention`, `retentionSize`, and `storageSpec.volumeClaimTemplate...storage`
+in `k8s/monitoring/values-kube-prometheus-stack.yaml`. The `storage` value does
+not expand the existing PVC. Keep it in sync anyway: the operator uses it when
+it recreates the StatefulSet, and a fresh install uses it too.
+
+#### Step 3 — Raise the XFS quota
+
+```bash
+NEW_SIZE=35Gi
+NEW_BYTES=37580963840
+
+# 3a. Persist the new size so it survives provisioner restarts
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- sed -i \
+  "s#^${PROJECT_ID}:/export/${PV}:[0-9]*\$#${PROJECT_ID}:/export/${PV}:${NEW_BYTES}#" /export/projects
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- cat /export/projects
+
+# 3b. Apply the live quota
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- \
+  xfs_quota -x -c "limit -p bhard=${NEW_BYTES} ${PROJECT_ID}" /export
+
+# 3c. Verify: the project's Hard column shows 35G
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- xfs_quota -x -c 'report -p -h' /export
+```
+
+You need both 3a and 3b: 3b applies the new limit now, and 3a keeps it after a
+restart. Run 3a first. If the `sed` is wrong, the live quota is still unchanged.
+Check that only this project's line changed.
+
+#### Step 4 — Update the PV
+
+```bash
+kubectl patch pv "$PV" --type merge -p "$(jq -n \
+  --arg b $'\n'"${PROJECT_ID}:/export/${PV}:${NEW_BYTES}"$'\n' --arg s "$NEW_SIZE" \
+  '{metadata:{annotations:{Project_block:$b}},spec:{capacity:{storage:$s}}}')"
+
+kubectl get pv "$PV" -o jsonpath='{.metadata.annotations.Project_block}{"\n"}{.spec.capacity}{"\n"}'
+```
+
+- **`Project_block` must match `/export/projects` exactly.** When the PV is
+  deleted, the provisioner removes this exact string from the projects file. If
+  the annotation still has the old size, the match fails and a stale line stays
+  in the file.
+- `spec.capacity` only changes what `kubectl get pv` shows.
+
+#### Step 5 — Pause the operator
+
+```bash
+kubectl -n monitoring patch prometheus kube-prometheus-stack-prometheus \
+  --type merge -p '{"spec":{"paused":true}}'
+```
+
+Step 7 deletes the StatefulSet. A running operator would recreate it right away
+from the old CR (5 Gi). This follows the prometheus-operator "Resizing volumes"
+procedure.
+
+#### Step 6 — Align the PVC spec and status
+
+```bash
+# 6a. Spec (allowed because the StorageClass has allowVolumeExpansion: true; grow only)
+kubectl -n monitoring patch pvc "$PVC" --type merge \
+  -p "{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"$NEW_SIZE\"}}}}"
+kubectl -n monitoring get events --field-selector involvedObject.name="$PVC"   # ExternalExpanding is expected
+
+# 6b. Status (kubectl >= 1.24); the CAPACITY column reads status.capacity
+kubectl -n monitoring patch pvc "$PVC" --subresource=status --type merge \
+  -p "{\"status\":{\"capacity\":{\"storage\":\"$NEW_SIZE\"}}}"
+
+# 6c. Nothing left pending
+kubectl -n monitoring get pvc "$PVC" -o json | jq '{ann:.metadata.annotations, spec:.spec.resources, status:.status}'
+```
+
+Normally the resizer writes `status.capacity` when it finishes. With no
+resizer, set it by hand, or `kubectl get pvc` keeps showing the old size. In
+6c, check that `status.conditions` has no `Resizing` or
+`FileSystemResizePending` entry and that no
+`volume.kubernetes.io/storage-resizer` annotation was added. Remove any you
+find.
+
+#### Step 7 — Orphan-delete the StatefulSet
+
+```bash
+kubectl -n monitoring delete sts prometheus-kube-prometheus-stack-prometheus --cascade=orphan
+kubectl -n monitoring get pod prometheus-kube-prometheus-stack-prometheus-0   # still Running
+```
+
+The StatefulSet must be recreated before the new `volumeClaimTemplates` can
+apply. `--cascade=orphan` leaves the pod and PVC in place, so Prometheus keeps
+running.
+
+#### Step 8 — Helm upgrade
+
+```bash
+helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --version "$(helm -n monitoring list -o json | jq -r '.[0].chart | sub("kube-prometheus-stack-"; "")')" \
+  --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --force-conflicts \
+  --wait --timeout 10m
+```
+
+- **Pin `--version` to the deployed chart.** Without it, the upgrade also bumps
+  the chart and may pull in CRD or default-value changes.
+- **Helm 4 requires `--force-conflicts`.** Helm 4 uses server-side apply.
+  Step 5 set `spec.paused` with `kubectl patch`, and the chart also sets it
+  (`false`). Without the flag, the upgrade fails with a field-manager conflict
+  on `.spec.paused` after it has already applied other objects, such as
+  Grafana. With the flag, Helm takes ownership of the field and sets it to
+  `false`.
+- This single apply writes the new retention, storage, and resources and also
+  unpauses the operator. The operator finds no StatefulSet, recreates it from
+  the 35 Gi template, and adopts the existing pod. The pod restarts once because
+  its retention args changed, which causes a ~1 minute scrape gap. WAL replay
+  keeps existing data.
+- With Helm 3 (no server-side apply), drop `--force-conflicts` and unpause
+  manually after the upgrade:
+  `kubectl -n monitoring patch prometheus kube-prometheus-stack-prometheus --type merge -p '{"spec":{"paused":false}}'`
+
+#### Step 9 — Verify
+
+```bash
+# CR unpaused and updated
+kubectl -n monitoring get prometheus kube-prometheus-stack-prometheus -o json | \
+  jq -c '.spec | {paused, retention, retentionSize, storage:.storage.volumeClaimTemplate.spec.resources}'
+
+# StatefulSet recreated; pod mounts the SAME PVC
+kubectl -n monitoring get sts,pod -l app.kubernetes.io/name=prometheus
+kubectl -n monitoring get pod prometheus-kube-prometheus-stack-prometheus-0 \
+  -o jsonpath='{.spec.volumes[?(@.persistentVolumeClaim)].persistentVolumeClaim.claimName}{"\n"}'
+
+# No SC / PV / PVC added or removed
+diff temporary/prom-resize/before.txt \
+     <(kubectl get sc,pv -o name; kubectl get pvc -A --no-headers | awk '{print $1"/"$2}')
+
+# Prometheus applied the new limits and kept old data
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 19090:9090 &
+curl -s localhost:19090/api/v1/status/runtimeinfo | jq .data.storageRetention   # "180d or 31GiB"
+curl -s -G localhost:19090/api/v1/query \
+  --data-urlencode 'query=(time()-prometheus_tsdb_lowest_timestamp_seconds)/86400' | jq '.data.result[0].value[1]'
+curl -s localhost:19090/api/v1/targets | jq '[.data.activeTargets[] | select(.health!="up")]'   # []
+
+# Quota and Helm values consistent
+kubectl -n nfs-storage exec nfs-server-provisioner-0 -- xfs_quota -x -c 'report -p -h' /export
+diff <(helm -n monitoring get values kube-prometheus-stack -o json | jq -S .) \
+     <(yq -o json k8s/monitoring/values-kube-prometheus-stack.yaml | jq -S .)
+
+rm -rf temporary/prom-resize
+```
+
+| Check                     | Expected                              | Why it matters                                    |
+|---------------------------|---------------------------------------|---------------------------------------------------|
+| CR                        | `paused: false`; new retention/storage | A paused operator ignores all later changes       |
+| Pod PVC name              | Unchanged                             | Confirms no new, empty PVC was created            |
+| SC / PV / PVC list        | Identical to Step 0                   | Confirms no added or removed storage resources    |
+| Oldest data (days)        | Same as before the resize             | Confirms the resize did not delete data           |
+| `storageRetention`        | `180d or 31GiB`                       | Effective setting inside Prometheus               |
+| Unhealthy targets         | Empty                                 | Confirms scraping resumed                         |
+
+The PVC `CAPACITY` column and kube-state-metrics'
+`kube_persistentvolumeclaim_resource_requests_storage_bytes` show 35 Gi.
+`kubelet_volume_stats_capacity_bytes` and `df` inside the pod show the whole
+NFS backing volume (136 Gi) for every NFS PVC. That is expected.
+
+#### Rollback
+
+| Failed at | Action                                                                                     |
+|-----------|--------------------------------------------------------------------------------------------|
+| Step 3    | Restore `/export/projects` from `projects.bak`, then `xfs_quota limit` back to the old bytes |
+| Step 4    | `kubectl patch` the annotation and capacity back from `pv.yaml`                            |
+| Step 6    | A PVC cannot shrink. The fields are display-only, so keep them or reset `status.capacity` via `--subresource=status` |
+| Step 7–8  | If the StatefulSet is not recreated, check that `spec.paused` is `false`, then read `kubectl -n monitoring logs deploy/kube-prometheus-stack-operator` |
+
+#### Pitfalls
+
+1. Changing only `storage` in the values file leaves the real limit at the old size.
+2. Changing only the live quota reverts on the next provisioner restart, and
+   Prometheus fails once the volume fills.
+3. A stale `Project_block` leaves an orphaned line in `/export/projects` after
+   the PV is deleted.
+4. Deleting the StatefulSet without pausing lets the operator recreate it from the old spec.
+5. Helm 4 without `--force-conflicts` fails partway through the upgrade.
+6. Treating `GB` as decimal undersizes the buffer: Prometheus uses GiB.
+7. Setting `retentionSize` equal to the PVC size leaves no compaction headroom,
+   so the volume can fill and crash Prometheus.
 
 ### Uninstall
 
