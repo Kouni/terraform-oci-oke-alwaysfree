@@ -2,7 +2,10 @@
 # Chart:   prometheus-community/kube-prometheus-stack
 # Cluster: OKE Always Free — ARM64 A1.Flex, NFS storage, single node
 # Scope:   Metrics + Alerting + Dashboards (Prometheus + Grafana + AlertManager)
-# Access:  Cloudflare Tunnel + Cloudflare Access (grafana.kouni.io) + kubectl port-forward
+# Access:  Cloudflare Tunnel + Cloudflare Access + kubectl port-forward
+# Site:    hostnames, Access team/AUD and admin emails live in
+#          values-kube-prometheus-stack.local.yaml (gitignored; copy the .example).
+#          Always pass both files to helm.
 #
 # Design principles:
 #   - All workloads pinned to ARM64 nodes (nodeSelector)
@@ -86,9 +89,7 @@ grafana:
       "helm.sh/resource-policy": keep
 
   grafana.ini:
-    server:
-      # Cloudflare Tunnel public URL — must match the tunnel ingress hostname
-      root_url: https://grafana.kouni.io
+    # server.root_url (Cloudflare Tunnel public URL) is set in the .local.yaml file.
     security:
       # Mark session cookies as Secure since external traffic arrives over HTTPS
       cookie_secure: true
@@ -98,10 +99,10 @@ grafana:
       # Grafana is reachable from the public internet through the Cloudflare Tunnel.
       disable_login: true
       disable_login_form: true
-      # Sign out also ends the Cloudflare Access session. Access revokes the
+      # signout_redirect_url (.local.yaml) points at <grafana host>/cdn-cgi/access/logout,
+      # so sign out also ends the Cloudflare Access session. Access revokes the
       # session for all Access applications (no per-app logout exists); using
-      # the app domain clears the grafana.kouni.io cookie immediately.
-      signout_redirect_url: https://grafana.kouni.io/cdn-cgi/access/logout
+      # the app domain clears the Grafana host cookie immediately.
     auth.basic:
       # Reject HTTP Basic auth on the API so the admin password cannot be
       # used remotely even if it leaks.
@@ -109,21 +110,20 @@ grafana:
     auth.jwt:
       # Cloudflare Access authenticates the user once (Google IdP) and attaches
       # a signed JWT to every request it forwards through the tunnel. Grafana
-      # verifies the signature against the team JWKS and pins aud/iss to the
-      # grafana.kouni.io Access application, so tokens from other Access apps
-      # or forged headers are rejected.
+      # verifies the signature against the team JWKS (jwk_set_url) and pins
+      # aud/iss to the Grafana Access application (expect_claims), so tokens
+      # from other Access apps or forged headers are rejected. Both are set
+      # in the .local.yaml file.
       enabled: true
       header_name: Cf-Access-Jwt-Assertion
       email_claim: email
       username_claim: email
-      jwk_set_url: https://kouni.cloudflareaccess.com/cdn-cgi/access/certs
       cache_ttl: 60m
-      expect_claims: '{"aud": ["07bcfa0b127a54b703c54df59dc5e39af84bdc9a3090b9e3f6b4fb96ea4429f2"], "iss": "https://kouni.cloudflareaccess.com"}'
       auto_sign_up: true
-      # Role is re-evaluated on every request. Listed accounts become Grafana
-      # server admins (password login is disabled, so this is the only admin
-      # path); every other account allowed by the Access policy is Viewer.
-      role_attribute_path: "contains(['kouni@lcse.org'], email) && 'GrafanaAdmin' || 'Viewer'"
+      # role_attribute_path (.local.yaml) is re-evaluated on every request.
+      # Listed accounts become Grafana server admins (password login is
+      # disabled, so this is the only admin path); every other account
+      # allowed by the Access policy is Viewer.
       allow_assign_grafana_admin: true
     auth.google:
       # Disabled: Cloudflare Access already authenticates with Google, and a
@@ -138,11 +138,9 @@ grafana:
       auth_url: https://accounts.google.com/o/oauth2/v2/auth
       token_url: https://oauth2.googleapis.com/token
       api_url: https://openidconnect.googleapis.com/v1/userinfo
-      # Restrict sign-in to @lcse.org Google Workspace accounts only
-      allowed_domains: lcse.org
+      # allowed_domains and role_attribute_path are set in the .local.yaml file.
       # Auto-create Grafana user on first Google sign-in
       allow_sign_up: true
-      role_attribute_path: "contains(['kouni@lcse.org'], email) && 'GrafanaAdmin' || 'Viewer'"
       allow_assign_grafana_admin: true
   # Inject Google OAuth credentials from the grafana-google-oauth Kubernetes Secret.
   # The secret must exist before running helm upgrade:
@@ -269,6 +267,18 @@ prometheus-node-exporter:
 
 # ──────────────── Prometheus Operator ────────────────
 prometheusOperator:
+  # shortcut: v0.95.1 image indexes label every manifest linux/amd64, including the
+  # -arm64 tags, so arm64 nodes cannot pull them
+  # (https://github.com/prometheus-operator/prometheus-operator/issues/8953).
+  # Pin the arm64 image manifest digests; drop both overrides once a fixed release ships.
+  image:
+    tag: v0.95.1-arm64
+    sha: 8f77cb79d1846f3b99319ca2bafda45a48da1a9597850d3a4e28f1d0ac0de2fd
+  prometheusConfigReloader:
+    image:
+      tag: v0.95.1-arm64
+      sha: 83143fd7d7721d2e03a1aedd945dc92e1ef912c79110a4ec3a0d68fe8678355f
+
   resources:
     requests:
       cpu: 100m

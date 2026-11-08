@@ -27,6 +27,7 @@ crash.*.log
 secret-thanos-objstore.yaml
 secret-loki-r2.yaml
 k8s/monitoring/secret-grafana-google-oauth.yaml
+k8s/monitoring/values-kube-prometheus-stack.local.yaml
 
 # Private keys
 *.pem

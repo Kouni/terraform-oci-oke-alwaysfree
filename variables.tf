@@ -79,7 +79,7 @@ variable "cluster_name" {
 variable "kubernetes_version" {
   description = "Kubernetes version for the cluster. If null, uses the latest available version"
   type        = string
-  default     = null
+  default     = "v1.37.0"
 }
 
 # Node pool configuration
@@ -118,12 +118,12 @@ variable "node_memory_in_gbs" {
 }
 
 variable "boot_volume_size_in_gbs" {
-  description = "Boot volume size in GBs per worker node. Boot + NFS volumes share the 200 GB Always Free block volume quota"
+  description = "Boot volume size in GBs per worker node. null uses the image default (~47 GB), counted as 50 GB toward the quota. Boot + NFS volumes share the 200 GB Always Free block volume quota"
   type        = number
-  default     = 64
+  default     = null
 
   validation {
-    condition     = var.boot_volume_size_in_gbs >= 50
+    condition     = coalesce(var.boot_volume_size_in_gbs, 50) >= 50
     error_message = "Boot volume must be at least 50 GB."
   }
 }
@@ -165,7 +165,7 @@ variable "enable_metrics_server" {
 variable "metrics_server_chart_version" {
   description = "metrics-server Helm chart version. If null, uses the latest available version — pin a specific version for reproducible deployments"
   type        = string
-  default     = null
+  default     = "3.14.0"
 }
 
 # NFS Storage
@@ -257,13 +257,13 @@ variable "cloudflare_tunnel_token" {
 variable "n8n_chart_version" {
   description = "n8n Helm chart version. If null, uses the latest available version"
   type        = string
-  default     = null
+  default     = "1.18.0"
 }
 
 variable "n8n_image_tag" {
-  description = "n8n container image tag (e.g. '1.94.1'). Defaults to 'latest' — pin a specific version for reproducible deployments"
+  description = "n8n container image tag. Pinned for reproducible deployments; 'latest' also works (pullPolicy becomes Always)"
   type        = string
-  default     = "latest"
+  default     = "2.46.6"
 }
 
 variable "n8n_registry_username" {
@@ -280,9 +280,9 @@ variable "n8n_registry_password" {
 }
 
 variable "cloudflared_image_tag" {
-  description = "cloudflared container image tag (e.g. '2025.4.1'). Defaults to 'latest' — pin a specific version for reproducible deployments"
+  description = "cloudflared container image tag. Pinned for reproducible deployments"
   type        = string
-  default     = "latest"
+  default     = "2026.10.7"
 }
 
 # ──────────────── Cloudflare Tunnel ────────────────
@@ -316,7 +316,7 @@ variable "tailscale_namespace" {
 variable "tailscale_operator_chart_version" {
   description = "Tailscale Operator Helm chart version. If null, uses the latest available version — pin a specific version for reproducible deployments"
   type        = string
-  default     = null
+  default     = "1.104.4"
 }
 
 variable "tailscale_tags" {
@@ -330,7 +330,7 @@ variable "tailscale_tags" {
 }
 
 variable "tailscale_oauth_client_id" {
-  description = "Tailscale OAuth client ID. Create at Tailscale Admin → Settings → OAuth Clients. Required when enable_tailscale is true"
+  description = "Tailscale OAuth client ID. Create at Tailscale Admin → Settings → Trust credentials → OAuth. Required when enable_tailscale is true"
   type        = string
   default     = null
   sensitive   = true
@@ -366,7 +366,7 @@ variable "tailscale_advertise_routes" {
 # ──────────────── Grafana Google OAuth ────────────────
 
 variable "grafana_google_client_id" {
-  description = "Google OAuth Client ID for Grafana. Create at: https://console.cloud.google.com/apis/credentials → Create OAuth 2.0 Client ID (Web application). Authorized redirect URI: https://grafana.kouni.io/login/google"
+  description = "Google OAuth Client ID for Grafana. Create at: https://console.cloud.google.com/apis/credentials → Create OAuth 2.0 Client ID (Web application). Authorized redirect URI: https://grafana.example.com/login/google"
   type        = string
   default     = null
   sensitive   = false
