@@ -741,6 +741,10 @@ resource "helm_release" "n8n" {
 
     # Single replica — disable PDB
     pdb = { enabled = false }
+
+    # SQLite must have a single writer: stop the old pod before starting the new
+    # one. rollingUpdate = null clears the API-server default, which Recreate rejects.
+    strategy = { type = "Recreate", rollingUpdate = null }
   })]
 
   depends_on = [helm_release.nfs_server_provisioner, kubernetes_namespace_v1.n8n, kubernetes_secret_v1.n8n_secrets, kubernetes_persistent_volume_claim_v1.n8n_data]
