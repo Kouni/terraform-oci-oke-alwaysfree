@@ -2,8 +2,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Complete Backup Script
 #
-# Backs up all K8s Secrets, n8n SQLite database, all Helm release values, and
-# OpenTofu config to backups/<TIMESTAMP>/. Run backup-nfs-data.sh separately
+# Backs up all K8s Secrets, n8n SQLite database, all Helm release values,
+# OpenTofu config and gitignored site-specific Helm values to
+# backups/<TIMESTAMP>/. Run backup-nfs-data.sh separately
 # for NFS PVC data (requires n8n scale-down).
 #
 # Backup files contain sensitive data. Store them securely.
@@ -17,6 +18,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BACKUP_DIR="${REPO_DIR}/backups"
 TIMESTAMP="$(date +%Y%m%d%H%M)"
 BACKUP_SUBDIR="${BACKUP_DIR}/${TIMESTAMP}"
+FAILED=0
 
 # ──────────────── Preflight checks ────────────────
 command -v kubectl >/dev/null 2>&1 || { echo "[ERROR] kubectl not found"; exit 1; }
@@ -113,6 +115,16 @@ if [ -f "${REPO_DIR}/terraform.tfstate" ]; then
 else
   echo "   [!]  terraform.tfstate not found, skipping"
 fi
+# Gitignored site-specific Helm values; kept out of the top level so the
+# restore loop below does not kubectl-apply it.
+LOCAL_VALUES="${REPO_DIR}/k8s/monitoring/values-kube-prometheus-stack.local.yaml"
+if [ -f "${LOCAL_VALUES}" ]; then
+  mkdir -p "${BACKUP_SUBDIR}/config"
+  cp "${LOCAL_VALUES}" "${BACKUP_SUBDIR}/config/"
+  echo "   [OK] values-kube-prometheus-stack.local.yaml"
+else
+  echo "   [!]  values-kube-prometheus-stack.local.yaml not found, skipping"
+fi
 
 # ──────────────── Backup n8n SQLite database ────────────────
 echo ""
@@ -120,13 +132,46 @@ echo "[*] Backing up n8n SQLite database..."
 N8N_POD=$(kubectl get pod -n n8n -l app.kubernetes.io/name=n8n \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 if [ -n "${N8N_POD}" ]; then
-  # Flush WAL to main database before copy
-  kubectl exec -n n8n "${N8N_POD}" -- \
-    sqlite3 /home/node/.n8n/database.sqlite "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
-  kubectl cp "n8n/${N8N_POD}:/home/node/.n8n/database.sqlite" \
-    "${BACKUP_SUBDIR}/database.sqlite" 2>/dev/null && \
-    echo "   [OK] database.sqlite ($(du -h "${BACKUP_SUBDIR}/database.sqlite" | cut -f1))" || \
-    echo "   [!]  Failed to copy database.sqlite"
+  # Copying the live file skips the WAL and yields a corrupt backup, and the image
+  # has no sqlite3 CLI. VACUUM INTO via Node's built-in node:sqlite writes a
+  # consistent snapshot from a read-only connection without stopping n8n.
+  # The snapshot is gzipped and its sha256 printed; the pod-to-host stream can
+  # drop its final frames (kubectl cp and exec both truncate it, with unreliable
+  # exit codes), so only a matching checksum counts as a successful transfer.
+  SNAPSHOT=/tmp/n8n-backup.sqlite
+  OUT_GZ="${BACKUP_SUBDIR}/database.sqlite.gz"
+  sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+  }
+  EXPECTED_SHA=$(kubectl exec -i -n n8n "${N8N_POD}" -- node --no-warnings - <<'JS'
+const { DatabaseSync } = require("node:sqlite");
+const fs = require("fs");
+const out = "/tmp/n8n-backup.sqlite";
+fs.rmSync(out, { force: true });
+new DatabaseSync("/home/node/.n8n/database.sqlite", { readOnly: true }).exec(`VACUUM INTO '${out}'`);
+const result = Object.values(new DatabaseSync(out, { readOnly: true }).prepare("PRAGMA integrity_check").get())[0];
+if (result !== "ok") { console.error(`integrity_check: ${result}`); process.exit(1); }
+const gz = require("zlib").gzipSync(fs.readFileSync(out));
+fs.writeFileSync(`${out}.gz`, gz);
+process.stdout.write(require("crypto").createHash("sha256").update(gz).digest("hex"));
+JS
+  ) || EXPECTED_SHA=""
+  if [ -n "${EXPECTED_SHA}" ]; then
+    for _ in 1 2 3 4 5; do
+      kubectl exec -n n8n "${N8N_POD}" -- cat "${SNAPSHOT}.gz" > "${OUT_GZ}" 2>/dev/null || true
+      [ "$(sha256_of "${OUT_GZ}")" = "${EXPECTED_SHA}" ] && break
+      rm -f "${OUT_GZ}"
+    done
+  fi
+  if [ -f "${OUT_GZ}" ] && gunzip -c "${OUT_GZ}" > "${BACKUP_SUBDIR}/database.sqlite"; then
+    rm -f "${OUT_GZ}"
+    echo "   [OK] database.sqlite ($(du -h "${BACKUP_SUBDIR}/database.sqlite" | cut -f1), integrity_check ok, sha256 verified)"
+  else
+    rm -f "${OUT_GZ}" "${BACKUP_SUBDIR}/database.sqlite"
+    echo "   [ERROR] database.sqlite snapshot failed (snapshot error or checksum mismatch after 5 attempts)"
+    FAILED=1
+  fi
+  kubectl exec -n n8n "${N8N_POD}" -- rm -f "${SNAPSHOT}" "${SNAPSHOT}.gz" >/dev/null 2>&1 || true
 else
   echo "   [!]  n8n pod not found, skipping database backup"
 fi
@@ -148,12 +193,14 @@ else
 fi
 
 # ──────────────── Rotation (keep latest MAX_BACKUPS) ────────────────
-BACKUP_COUNT=$(find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | wc -l | tr -d ' ')
+# Only this script's timestamped dirs; nfs-* dirs from backup-nfs-data.sh sort
+# after digits and must never be counted or removed here.
+BACKUP_COUNT=$(find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' | wc -l | tr -d ' ')
 if [ "${BACKUP_COUNT}" -gt "${MAX_BACKUPS}" ]; then
   REMOVE_COUNT=$((BACKUP_COUNT - MAX_BACKUPS))
   echo ""
   echo "[*]  Rotating old backups (keeping latest ${MAX_BACKUPS})..."
-  find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d | sort | head -n "${REMOVE_COUNT}" | while read -r old_dir; do
+  find "${BACKUP_DIR}" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' | sort | head -n "${REMOVE_COUNT}" | while read -r old_dir; do
     echo "   [*]  Removing ${old_dir}"
     rm -rf "${old_dir}"
   done
@@ -177,6 +224,13 @@ echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
 echo ""
 echo "   Restore (new cluster):"
 echo "      cp \"${BACKUP_SUBDIR}/terraform/terraform.tfvars\" ."
+echo "      cp \"${BACKUP_SUBDIR}/config/values-kube-prometheus-stack.local.yaml\" k8s/monitoring/"
 echo "      tofu apply"
 echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do kubectl apply -f \"\$f\"; done"
 echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
+
+if [ "${FAILED}" -ne 0 ]; then
+  echo ""
+  echo "[ERROR] Backup finished with errors — see [ERROR] lines above."
+  exit 1
+fi
