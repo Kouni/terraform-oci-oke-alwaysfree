@@ -296,7 +296,7 @@ It is recommended to add Cloudflare Access as a first line of defense in additio
    | Action | `Allow` |
    | Include rule | Emails ending in `@your-domain.com` |
 
-   > Example: If your organization email domain is `@lcse.org`, set "Emails ending in" = `@lcse.org`.
+   > Example: If your organization email domain is `@example.com`, set "Emails ending in" = `@example.com`.
    > This way, only users with that email domain who pass OTP verification can access n8n.
 
 6. Save the configuration

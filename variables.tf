@@ -366,7 +366,7 @@ variable "tailscale_advertise_routes" {
 # ──────────────── Grafana Google OAuth ────────────────
 
 variable "grafana_google_client_id" {
-  description = "Google OAuth Client ID for Grafana. Create at: https://console.cloud.google.com/apis/credentials → Create OAuth 2.0 Client ID (Web application). Authorized redirect URI: https://grafana.kouni.io/login/google"
+  description = "Google OAuth Client ID for Grafana. Create at: https://console.cloud.google.com/apis/credentials → Create OAuth 2.0 Client ID (Web application). Authorized redirect URI: https://grafana.example.com/login/google"
   type        = string
   default     = null
   sensitive   = false

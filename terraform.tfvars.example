@@ -124,8 +124,8 @@ notification_email    = "you@example.com"
 # Prerequisites:
 #   1. Go to: https://console.cloud.google.com/apis/credentials
 #   2. Create → OAuth client ID → Application type: Web application
-#   3. Authorized redirect URIs: https://grafana.kouni.io/login/google
-#      (replace "kouni.io" with your actual Cloudflare domain or public URL)
+#   3. Authorized redirect URIs: https://grafana.example.com/login/google
+#      (replace "example.com" with your actual Cloudflare domain or public URL)
 #   4. Copy the generated Client ID and Client Secret below
 # grafana_google_client_id     = "123456789-abcdefghijklmnopqr.apps.googleusercontent.com"  # sensitive — do not commit
 # grafana_google_client_secret = "GOCSPX-..."  # sensitive — do not commit

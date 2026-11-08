@@ -7,7 +7,7 @@
 
 ```
 Cloudflare Tunnel
-grafana.kouni.io
+grafana.example.com
        │
        ▼ HTTP / ClusterIP
 ┌──────────────┐
@@ -97,12 +97,21 @@ helm repo update
 
 ### Step 3 — Install kube-prometheus-stack
 
+Site-specific values (Grafana hostname, Cloudflare Access team and AUD tag, admin
+emails) live in a gitignored file. Create it once and fill in the placeholders:
+
+```bash
+cp k8s/monitoring/values-kube-prometheus-stack.local.yaml.example \
+   k8s/monitoring/values-kube-prometheus-stack.local.yaml
+```
+
 ```bash
 helm upgrade --install kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
   --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --values k8s/monitoring/values-kube-prometheus-stack.local.yaml \
   --wait --timeout 10m
 ```
 
@@ -125,12 +134,12 @@ In the **Cloudflare Zero Trust Dashboard** → Networks → Tunnels → your tun
 
 | Field    | Value                                                     |
 |----------|-----------------------------------------------------------|
-| Hostname | `grafana.kouni.io`                                        |
+| Hostname | `grafana.example.com`                                        |
 | Service  | `http://kube-prometheus-stack-grafana.monitoring.svc:80`  |
 
-Grafana is already configured with `root_url: https://grafana.kouni.io` and `cookie_secure: true`.
+Set `server.root_url` in `values-kube-prometheus-stack.local.yaml` to this hostname; `cookie_secure: true` is in the base values.
 
-Verify: open `https://grafana.kouni.io` — it redirects to Cloudflare Access (see [Sign-in](#sign-in-cloudflare-access-jwt)).
+Verify: open `https://grafana.example.com` — it redirects to Cloudflare Access (see [Sign-in](#sign-in-cloudflare-access-jwt)).
 
 ### Cloudflare Access (edge authentication)
 
@@ -146,7 +155,7 @@ In the **Cloudflare Zero Trust Dashboard**:
 
    | Field                          | Value                            |
    |--------------------------------|----------------------------------|
-   | Public hostname                | `grafana.kouni.io` (no path)     |
+   | Public hostname                | `grafana.example.com` (no path)     |
    | Session duration               | `24 hours`                       |
    | Identity providers             | Google only                      |
    | Apply instant authentication   | On                               |
@@ -156,21 +165,21 @@ In the **Cloudflare Zero Trust Dashboard**:
    | Field   | Value                            |
    |---------|----------------------------------|
    | Action  | `Allow` (not `Bypass` — Bypass does not issue the JWT Grafana needs) |
-   | Include | **Emails ending in** `@lcse.org` |
+   | Include | **Emails ending in** `@example.com` |
 
-4. **Networks → Tunnels → your tunnel → Public hostname `grafana.kouni.io` → Access**:
+4. **Networks → Tunnels → your tunnel → Public hostname `grafana.example.com` → Access**:
    enable **Protect with Access** for the same application, so cloudflared itself
    rejects requests without a valid Access token.
 
 Verify from an unauthenticated session; the response should be a redirect to
-`kouni.cloudflareaccess.com`, not Grafana:
+`<team>.cloudflareaccess.com`, not Grafana:
 
 ```bash
-curl -sI https://grafana.kouni.io/.env | grep -i '^location'
+curl -sI https://grafana.example.com/.env | grep -i '^location'
 ```
 
 The redirect URL also exposes the application's AUD tag as the `kid` query parameter.
-If the Access application is recreated, update `expect_claims` in the Helm values.
+If the Access application is recreated, update `expect_claims` in `values-kube-prometheus-stack.local.yaml`.
 
 ### Port-forward (local / fallback)
 
@@ -190,7 +199,7 @@ signs the user in from it:
 
 | Setting          | Value                                                               |
 |------------------|---------------------------------------------------------------------|
-| `jwk_set_url`    | `https://kouni.cloudflareaccess.com/cdn-cgi/access/certs`           |
+| `jwk_set_url`    | `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`           |
 | `expect_claims`  | `aud` = the Access application's AUD tag, `iss` = the team domain   |
 | User identity    | `email` claim (auto sign-up)                                        |
 | Role             | `role_attribute_path`, re-evaluated on every request                |
@@ -202,11 +211,11 @@ sign in either.
 
 | Scenario | Behaviour |
 |----------|-----------|
-| Visit `https://grafana.kouni.io` | Cloudflare Access → Google sign-in (once) → Grafana |
-| `@lcse.org` account | Account auto-created, role: **Viewer** |
+| Visit `https://grafana.example.com` | Cloudflare Access → Google sign-in (once) → Grafana |
+| `@example.com` account | Account auto-created, role: **Viewer** |
 | Account listed in `role_attribute_path` | Role: **Grafana Admin** |
 | Any other account | Rejected by the Access policy |
-| Promote user | Add the email to `role_attribute_path` in the Helm values (UI role changes are overwritten) |
+| Promote user | Add the email to `role_attribute_path` in `values-kube-prometheus-stack.local.yaml` (UI role changes are overwritten) |
 | Password login (form, `POST /login`, Basic auth) | Disabled |
 | Grafana **Sign out** | Redirects to `/cdn-cgi/access/logout` (`auth.signout_redirect_url`), revoking the Access session for **all** Access applications (n8n, Prometheus, …); Access has no per-app logout |
 
@@ -222,7 +231,7 @@ Secret are kept so it can be re-enabled (`auth.google.enabled: true`,
 1. Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials)
 2. Click **Create Credentials → OAuth client ID**
 3. Application type: **Web application**
-4. Add **Authorized redirect URI**: `https://grafana.kouni.io/login/google`
+4. Add **Authorized redirect URI**: `https://grafana.example.com/login/google`
 5. Copy the generated **Client ID** and **Client Secret**
 
 #### Step 2 — Create Kubernetes Secret
@@ -250,6 +259,7 @@ helm upgrade --install kube-prometheus-stack \
   --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --values k8s/monitoring/values-kube-prometheus-stack.local.yaml \
   --wait --timeout 10m
 ```
 
@@ -302,7 +312,8 @@ helm upgrade kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
   --version 93.0.0 \
   --namespace monitoring \
-  --values k8s/monitoring/values-kube-prometheus-stack.yaml
+  --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --values k8s/monitoring/values-kube-prometheus-stack.local.yaml
 ```
 
 ### Upgrade chart major version
@@ -326,6 +337,7 @@ helm upgrade kube-prometheus-stack \
   --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --values k8s/monitoring/values-kube-prometheus-stack.local.yaml \
   --wait --timeout 10m
 ```
 
@@ -379,7 +391,7 @@ kubectl get pvc -A --no-headers | awk '{print $1"/"$2}' >> temporary/prom-resize
 
 # The live release must match the repo, or the upgrade will overwrite live-only changes
 diff <(helm -n monitoring get values kube-prometheus-stack -o json | jq -S .) \
-     <(yq -o json k8s/monitoring/values-kube-prometheus-stack.yaml | jq -S .)
+     <(yq eval-all -o json '. as $i ireduce ({}; . * $i)' k8s/monitoring/values-kube-prometheus-stack.yaml k8s/monitoring/values-kube-prometheus-stack.local.yaml | jq -S .)
 
 # PVCs must survive the StatefulSet deletion in Step 7 (expect Retain/Retain)
 kubectl -n monitoring get sts prometheus-kube-prometheus-stack-prometheus \
@@ -505,6 +517,7 @@ helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --version "$(helm -n monitoring list -o json | jq -r '.[0].chart | sub("kube-prometheus-stack-"; "")')" \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+  --values k8s/monitoring/values-kube-prometheus-stack.local.yaml \
   --force-conflicts \
   --wait --timeout 10m
 ```
@@ -552,7 +565,7 @@ curl -s localhost:19090/api/v1/targets | jq '[.data.activeTargets[] | select(.he
 # Quota and Helm values consistent
 kubectl -n nfs-storage exec nfs-server-provisioner-0 -- xfs_quota -x -c 'report -p -h' /export
 diff <(helm -n monitoring get values kube-prometheus-stack -o json | jq -S .) \
-     <(yq -o json k8s/monitoring/values-kube-prometheus-stack.yaml | jq -S .)
+     <(yq eval-all -o json '. as $i ireduce ({}; . * $i)' k8s/monitoring/values-kube-prometheus-stack.yaml k8s/monitoring/values-kube-prometheus-stack.local.yaml | jq -S .)
 
 rm -rf temporary/prom-resize
 ```

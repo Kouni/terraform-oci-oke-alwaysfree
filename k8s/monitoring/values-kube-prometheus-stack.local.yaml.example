@@ -1,0 +1,28 @@
+# ──────────────── kube-prometheus-stack site-specific values ────────────────
+# Layered on top of values-kube-prometheus-stack.yaml; holds hostnames, the
+# Cloudflare Access team/AUD and admin emails so they stay out of git.
+#
+#   cp k8s/monitoring/values-kube-prometheus-stack.local.yaml.example \
+#      k8s/monitoring/values-kube-prometheus-stack.local.yaml
+#
+# The copy is gitignored. Pass both files to helm, base first:
+#   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
+#   --values k8s/monitoring/values-kube-prometheus-stack.local.yaml
+
+grafana:
+  grafana.ini:
+    server:
+      # Cloudflare Tunnel public URL — must match the tunnel ingress hostname
+      root_url: https://grafana.example.com
+    auth:
+      signout_redirect_url: https://grafana.example.com/cdn-cgi/access/logout
+    auth.jwt:
+      # <team> is the Cloudflare Zero Trust team name; the AUD tag is on the
+      # Access application's Overview tab.
+      jwk_set_url: https://<team>.cloudflareaccess.com/cdn-cgi/access/certs
+      expect_claims: '{"aud": ["<access-application-aud-tag>"], "iss": "https://<team>.cloudflareaccess.com"}'
+      role_attribute_path: "contains(['admin@example.com'], email) && 'GrafanaAdmin' || 'Viewer'"
+    auth.google:
+      # Restrict sign-in to this Google Workspace domain
+      allowed_domains: example.com
+      role_attribute_path: "contains(['admin@example.com'], email) && 'GrafanaAdmin' || 'Viewer'"
