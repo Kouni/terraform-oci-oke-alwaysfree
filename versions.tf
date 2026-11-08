@@ -4,19 +4,19 @@ terraform {
   required_providers {
     oci = {
       source  = "oracle/oci"
-      version = "~> 8.0"
+      version = "9.12.1"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 3.0"
+      version = "3.3.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 3.0"
+      version = "3.5.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.7"
+      version = "3.9.1"
     }
   }
 }

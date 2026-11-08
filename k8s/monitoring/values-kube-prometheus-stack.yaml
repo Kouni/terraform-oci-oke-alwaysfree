@@ -269,6 +269,18 @@ prometheus-node-exporter:
 
 # ──────────────── Prometheus Operator ────────────────
 prometheusOperator:
+  # shortcut: v0.95.1 image indexes label every manifest linux/amd64, including the
+  # -arm64 tags, so arm64 nodes cannot pull them
+  # (https://github.com/prometheus-operator/prometheus-operator/issues/8953).
+  # Pin the arm64 image manifest digests; drop both overrides once a fixed release ships.
+  image:
+    tag: v0.95.1-arm64
+    sha: 8f77cb79d1846f3b99319ca2bafda45a48da1a9597850d3a4e28f1d0ac0de2fd
+  prometheusConfigReloader:
+    image:
+      tag: v0.95.1-arm64
+      sha: 83143fd7d7721d2e03a1aedd945dc92e1ef912c79110a4ec3a0d68fe8678355f
+
   resources:
     requests:
       cpu: 100m

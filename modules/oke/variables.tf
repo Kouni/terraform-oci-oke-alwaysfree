@@ -53,9 +53,9 @@ variable "node_memory_in_gbs" {
 }
 
 variable "boot_volume_size_in_gbs" {
-  description = "Boot volume size in GBs per worker node"
+  description = "Boot volume size in GBs per worker node. null uses the image default"
   type        = number
-  default     = 64
+  default     = null
 }
 
 variable "ssh_public_key" {

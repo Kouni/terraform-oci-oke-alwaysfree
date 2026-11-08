@@ -9,9 +9,10 @@ provider "oci" {
 
 locals {
   # Always Free resource limit validations
-  total_ocpus               = var.node_count * var.node_ocpus
-  total_memory_in_gbs       = var.node_count * var.node_memory_in_gbs
-  total_boot_volume_in_gbs  = var.node_count * var.boot_volume_size_in_gbs
+  total_ocpus         = var.node_count * var.node_ocpus
+  total_memory_in_gbs = var.node_count * var.node_memory_in_gbs
+  # null = image default boot volume (~47 GB); counted as 50 GB so the quota check stays conservative.
+  total_boot_volume_in_gbs  = var.node_count * coalesce(var.boot_volume_size_in_gbs, 50)
   total_block_volume_in_gbs = local.total_boot_volume_in_gbs + (var.enable_nfs_storage ? var.nfs_volume_size_in_gbs : 0)
 
   tailscale_hostname = coalesce(var.tailscale_hostname, var.cluster_name)

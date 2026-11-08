@@ -100,6 +100,7 @@ helm repo update
 ```bash
 helm upgrade --install kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
+  --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
   --wait --timeout 10m
@@ -246,6 +247,7 @@ The `values-kube-prometheus-stack.yaml` already includes the OAuth config. A `he
 ```bash
 helm upgrade --install kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
+  --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
   --wait --timeout 10m
@@ -298,6 +300,7 @@ Dashboards → New → Import → Upload JSON file
 ```bash
 helm upgrade kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
+  --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml
 ```
@@ -311,7 +314,7 @@ for breaking changes, then apply the CRDs matching the new chart's `appVersion`
 
 ```bash
 helm repo update
-OPERATOR_VERSION=$(helm show chart prometheus-community/kube-prometheus-stack | awk '/^appVersion:/ {print $2}')
+OPERATOR_VERSION=$(helm show chart prometheus-community/kube-prometheus-stack --version 93.0.0 | awk '/^appVersion:/ {print $2}')
 for crd in alertmanagerconfigs alertmanagers podmonitors probes prometheusagents \
            prometheuses prometheusrules scrapeconfigs servicemonitors thanosrulers; do
   kubectl apply --server-side --force-conflicts -f \
@@ -320,6 +323,7 @@ done
 
 helm upgrade kube-prometheus-stack \
   prometheus-community/kube-prometheus-stack \
+  --version 93.0.0 \
   --namespace monitoring \
   --values k8s/monitoring/values-kube-prometheus-stack.yaml \
   --wait --timeout 10m
