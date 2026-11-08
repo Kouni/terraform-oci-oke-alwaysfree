@@ -879,10 +879,16 @@ resource "helm_release" "tailscale_operator" {
   timeout         = 600
   cleanup_on_fail = true
 
-  values = [sensitive(yamlencode({
+  # The helm provider copies `values` into metadata.values in plain text, even when wrapped
+  # in sensitive(); only set_sensitive entries are redacted there.
+  set_sensitive = [{
+    name  = "oauth.clientSecret"
+    value = var.tailscale_oauth_client_secret
+  }]
+
+  values = [yamlencode({
     oauth = {
-      clientId     = var.tailscale_oauth_client_id
-      clientSecret = var.tailscale_oauth_client_secret
+      clientId = var.tailscale_oauth_client_id
     }
     # OKE uses CRI-O which enforces fully-qualified image names.
     # Without the registry prefix, CRI-O rejects "short name" images.
@@ -899,14 +905,14 @@ resource "helm_release" "tailscale_operator" {
         tag        = "latest"
       }
     }
-  }))]
+  })]
 
   depends_on = [terraform_data.wait_for_nodes, kubernetes_namespace_v1.tailscale[0]]
 
   lifecycle {
     precondition {
       condition     = var.tailscale_oauth_client_id != null && var.tailscale_oauth_client_id != ""
-      error_message = "tailscale_oauth_client_id is required and must be non-empty when enable_tailscale is true. Create an OAuth client at Tailscale Admin → Settings → OAuth Clients."
+      error_message = "tailscale_oauth_client_id is required and must be non-empty when enable_tailscale is true. Create an OAuth client at Tailscale Admin → Settings → Trust credentials → OAuth."
     }
     precondition {
       condition     = var.tailscale_oauth_client_secret != null && var.tailscale_oauth_client_secret != ""

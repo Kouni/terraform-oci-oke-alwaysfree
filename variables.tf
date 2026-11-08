@@ -330,7 +330,7 @@ variable "tailscale_tags" {
 }
 
 variable "tailscale_oauth_client_id" {
-  description = "Tailscale OAuth client ID. Create at Tailscale Admin → Settings → OAuth Clients. Required when enable_tailscale is true"
+  description = "Tailscale OAuth client ID. Create at Tailscale Admin → Settings → Trust credentials → OAuth. Required when enable_tailscale is true"
   type        = string
   default     = null
   sensitive   = true
