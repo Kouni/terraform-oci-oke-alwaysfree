@@ -67,7 +67,7 @@ notification_email    = "you@example.com"
 # metrics_server_chart_version = "3.14.0"  # null = latest
 
 # ──────────────── NFS Storage ────────────────
-# Boot (64 GB) + NFS (136 GB) = 200 GB Always Free limit
+# Boot (null = image default, counted as 50 GB) + NFS must total <= 200 GB (Always Free); NFS max 150 GB with the default boot volume
 # enable_nfs_storage     = false
 # nfs_volume_size_in_gbs = 136
 
