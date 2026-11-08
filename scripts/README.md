@@ -56,7 +56,7 @@ Restores n8n PVC data from a backup created by `backup-nfs-data.sh`. Used after 
 
 ```bash
 # 1. Restore all K8s Secrets
-for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
+for f in backups/<TIMESTAMP>/*.yaml; do [[ "$(basename "$f")" == helm-* ]] || kubectl apply -f "$f"; done  # helm-*.yaml are Helm values, not manifests
 
 # 2. Restore NFS PVC data
 ./scripts/restore-nfs-data.sh backups/nfs-<TIMESTAMP>
@@ -70,7 +70,7 @@ cp backups/<TIMESTAMP>/terraform/terraform.tfvars .
 tofu apply
 
 # 2. Restore K8s Secrets (OpenTofu already recreates most, but apply backup to override)
-for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
+for f in backups/<TIMESTAMP>/*.yaml; do [[ "$(basename "$f")" == helm-* ]] || kubectl apply -f "$f"; done  # helm-*.yaml are Helm values, not manifests
 
 # 3. Restore NFS PVC data
 ./scripts/restore-nfs-data.sh backups/nfs-<TIMESTAMP>

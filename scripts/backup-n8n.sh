@@ -219,14 +219,14 @@ echo "   2. N8N_ENCRYPTION_KEY is critical — losing it makes all n8n credentia
 echo "   3. Run ./scripts/backup-nfs-data.sh separately to back up NFS PVC data."
 echo ""
 echo "   Restore (same cluster):"
-echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do kubectl apply -f \"\$f\"; done"
+echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do [[ \"\$(basename \"\$f\")\" == helm-* ]] || kubectl apply -f \"\$f\"; done"
 echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
 echo ""
 echo "   Restore (new cluster):"
 echo "      cp \"${BACKUP_SUBDIR}/terraform/terraform.tfvars\" ."
 echo "      cp \"${BACKUP_SUBDIR}/config/values-kube-prometheus-stack.local.yaml\" k8s/monitoring/"
 echo "      tofu apply"
-echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do kubectl apply -f \"\$f\"; done"
+echo "      for f in \"${BACKUP_SUBDIR}\"/*.yaml; do [[ \"\$(basename \"\$f\")\" == helm-* ]] || kubectl apply -f \"\$f\"; done"
 echo "      ./scripts/restore-nfs-data.sh <nfs-backup-dir>"
 
 if [ "${FAILED}" -ne 0 ]; then
