@@ -20,7 +20,9 @@ bash scripts/destroy.sh -auto-approve # non-interactive
 
 ## backup-n8n.sh
 
-Backs up all Kubernetes Secrets (n8n, tunnel, monitoring, tailscale namespaces), n8n SQLite database, all Helm release values, and OpenTofu config (`terraform.tfvars`, `terraform.tfstate`) to `backups/<TIMESTAMP>/`.
+Backs up all Kubernetes Secrets (n8n, tunnel, monitoring, tailscale namespaces), the n8n SQLite database, all Helm release values, OpenTofu config (`terraform.tfvars`, `terraform.tfstate`) and `k8s/monitoring/values-kube-prometheus-stack.local.yaml` (under `config/`) to `backups/<TIMESTAMP>/`.
+
+The database is an online `VACUUM INTO` snapshot, integrity-checked in the pod and sha256-verified after transfer; n8n keeps running. The script exits non-zero if the snapshot fails. Rotation keeps the latest 7 `backups/<TIMESTAMP>/` directories and never touches `backups/nfs-*`.
 
 ```bash
 ./scripts/backup-n8n.sh
@@ -54,7 +56,7 @@ Restores n8n PVC data from a backup created by `backup-nfs-data.sh`. Used after 
 
 ```bash
 # 1. Restore all K8s Secrets
-for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
+for f in backups/<TIMESTAMP>/*.yaml; do [[ "$(basename "$f")" == helm-* ]] || kubectl apply -f "$f"; done  # helm-*.yaml are Helm values, not manifests
 
 # 2. Restore NFS PVC data
 ./scripts/restore-nfs-data.sh backups/nfs-<TIMESTAMP>
@@ -68,7 +70,7 @@ cp backups/<TIMESTAMP>/terraform/terraform.tfvars .
 tofu apply
 
 # 2. Restore K8s Secrets (OpenTofu already recreates most, but apply backup to override)
-for f in backups/<TIMESTAMP>/*.yaml; do kubectl apply -f "$f"; done
+for f in backups/<TIMESTAMP>/*.yaml; do [[ "$(basename "$f")" == helm-* ]] || kubectl apply -f "$f"; done  # helm-*.yaml are Helm values, not manifests
 
 # 3. Restore NFS PVC data
 ./scripts/restore-nfs-data.sh backups/nfs-<TIMESTAMP>
